@@ -1,0 +1,21 @@
+include MANIFEST.in
+include README.md
+include setup.py
+
+graft qtpyt
+
+recursive-include qttools *.py
+
+global-exclude *.html
+global-exclude *.sh
+global-exclude .git*
+global-exclude *.so
+global-exclude *.pyc
+
+prune .github
+prune tests
+prune qtpyt/_deprecated
+prune qtpyt/surface/tests
+prune qtpyt/block_tridiag/tests
+prune qtpyt/block_tridiag/develop.bak
+prune __pycache__
