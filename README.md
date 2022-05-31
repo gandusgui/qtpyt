@@ -1,39 +1,24 @@
-# pyqt
+# qtpyt
 
-A quantum transport library based on the non equilibrium Green's function (NEGF) formalism written in Python.
+A quantum transport library based on the Non-equilibrium Green's function (NEGF) formalism written in Python.
 
-## Getting Started
+## Features
 
-These instructions will get you a copy of the project up and running on your local machine for development and testing purposes. See deployment for notes on how to deploy the project on a live system.
+* `base` : Base API for Green's function and Self-energies.
+* `block_tridiag` : Block-tridiagonal Green's function and recursive algorithms.
+* `surface` : Surface Green's function based on *Principal Layer*.
+* `screening` : GW many-body screening.
+* `parallel` : MPI API for parallel calculations.
 
-### Prerequisites
-
-    > Ase https://wiki.fysik.dtu.dk/ase/
-    > numpy https://github.com/numpy
+## Dependencies
 
 
-### Installing
+* ase
+* scipy
+* numpy >= 1.21, < 1.22
+* numba >= 0.55
+* mpi4py
 
-pip install qtpyt
+## License
 
-## Running the tests
-
-pytest subfolder/tests
-
-### Upload
-
-# change version number.
-
-twine upload --repository testpypi dist/qtpyt-0.0.tar.gz
-
-### Register
-
-python setup.py sdist
-
-### Build Cython
-
-python setup.py build_ext --inplace
-
-### Install develop
-
-pip install -e .
+The qtpyt license is MIT, please see the LICENSE file.
