@@ -15,5 +15,4 @@ __pycache__/
 qtpyt.egg-info/
 build
 dist
-sync-gjilan.lua
-sync-daint.lua
+*.lua
