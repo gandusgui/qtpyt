@@ -16,3 +16,4 @@ qtpyt.egg-info/
 build
 dist
 sync-gjilan.lua
+sync-daint.lua

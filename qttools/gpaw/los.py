@@ -17,6 +17,7 @@ def makeLOs(
     active,
     gpwfile="scatt.gpw",
     orbitalfile="w_wG.npy",
+    xcfile="xc.npy",
     indxscattfile="index_p.npy",
     indxactivefile="index_c.npy",
     hsfile="hs_lolw_k.npy",
@@ -51,7 +52,7 @@ def makeLOs(
         U = Usub.dot(Ulow)
     else:
         U = Usub
-        
+
     los = LOs(U[:, index_p].T, lcao)
 
     for w, w_G in enumerate(los.get_orbitals(index_c)):
@@ -61,6 +62,7 @@ def makeLOs(
     np.save(orbitalfile, w_wG)
     np.save(indxscattfile, index_p)
     np.save(indxactivefile, index_c)
+    np.save(xcfile, los.get_xc(w_wG))
     np.save(hsfile, (H[None, :], S[None, :]))
 
 
