@@ -10,6 +10,8 @@
 *.png
 *.so
 *.bin
+.vscode
+bin/
 __pycache__/
 .eggs/
 qtpyt.egg-info/
