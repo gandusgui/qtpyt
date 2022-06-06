@@ -36,9 +36,16 @@ class Fock(ConstSelfEnergy):
             return None
         return xp.empty_like(self.U_pq)
 
-    def update(self):
-        assert self.gf.domain == "e"
-        D = self.gf.get_density_matrix()
+    def update(self, D=None):
+        """Update Fock self-energy
+        
+        Args:
+            D : (optional)
+                The density matrix.
+        """
+        if D is None:
+            assert self.gf.domain == "e"
+            D = self.gf.get_density_matrix()
 
         pre = -1.0  # -1. from definition
 
@@ -92,12 +99,21 @@ class Hartree(ConstSelfEnergy):
             return None
         return xp.empty(self.U_pq.shape[1], complex)
 
-    def initialize(self):
-        self.hartree_product(self.Sigma0)
+    def initialize(self, D=None):
+        self.hartree_product(D, self.Sigma0)
 
-    def hartree_product(self, Sigma=None):
-        assert self.gf.domain == "e"
-        D = self.gf.get_density_matrix()
+    def hartree_product(self, D=None, Sigma=None):
+        """Update Hartree self-energy
+        
+        Args:
+            D : (optional)
+                The density matrix.
+            Sigma: (optional)
+                The self-energy array to update.
+        """
+        if D is None:
+            assert self.gf.domain == "e"
+            D = self.gf.get_density_matrix()
 
         if Sigma is None:
             Sigma = self.Sigma
@@ -119,6 +135,6 @@ class Hartree(ConstSelfEnergy):
             work2=work2,
         )
 
-    def update(self):
-        self.hartree_product()
+    def update(self, D):
+        self.hartree_product(D, self.Sigma)
         self.Sigma -= self.Sigma0

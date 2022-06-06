@@ -6,29 +6,23 @@ from pathlib import Path
 
 import numpy as np
 from ase.io import read
-
 # green's function
 from qtpyt.base.greenfunction import GreenFunction
 from qtpyt.base.leads import LeadSelfEnergy
-from qtpyt.base.selfenergy import ConstSelfEnergy, DataSelfEnergy, StackSelfEnergy
+from qtpyt.base.selfenergy import ConstSelfEnergy, StackSelfEnergy
 from qtpyt.basis import Basis
-
 # comm
 from qtpyt.parallel import comm
 from qtpyt.parallel.log import get_logger
 from qtpyt.projector import ExpandSelfEnergy, ProjectedGreenFunction
-
 # screening
 from qtpyt.screening.distgf import DistGreenFunction
 from qtpyt.screening.polarization import cGW
 from qtpyt.screening.static import Fock, Hartree
-
 # Surface
 from qtpyt.surface.tools import prepare_leads_matrices
-
 # remove PBC
 from qtpyt.tools import remove_pbc
-
 # self-consistent
 from scipy.optimize import broyden1
 
@@ -88,9 +82,8 @@ gf0 = DistGreenFunction(ProjectedGreenFunction(gf, index_p), energies)
 gf1 = gf0.take_subspace(index_c)
 
 gw = cGW(gf1, V_qq, U_pq, oversample=10)
-V_cc = gw.U_cq.dot(V_qq).dot(gw.U_cq.T)
-fock = Fock(gf1, V_cc)
-hartree = Hartree(gf1, V_cc)
+fock = Fock(gf1, V_qq, gw.U_cq)
+hartree = Hartree(gf1, V_qq, gw.U_cq)
 se_xc = ConstSelfEnergy(Sigma=-xc[np.ix_(index_c, index_c)])
 se_Fcore = ConstSelfEnergy(Sigma=Fcore[np.ix_(index_c, index_c)])
 
@@ -131,10 +124,14 @@ def save_pdos(filename):
 # Logger for root process
 log = get_logger(__name__, open_log=comm.rank == 0)
 
+project = gf1.gf0.projector.project
+S1 = gf1.gf0.S
+
 gf1.update(callback=store_1d)
-D0 = gf1.get_density_matrix()
-N0 = 2.0 * D0.dot(gf1.gf0.S).real.trace()
-log.info(f"# of electrons : {N0}")
+D0 = gf0.get_density_matrix()
+D1 = project(D0)
+N1 = 2.0 * D1.dot(S1).real.trace()
+log.info(f"# of electrons : {N1}")
 save_1d(DOS, "DOS_DFT.npy")
 save_1d(T, "T_DFT.npy")
 save_pdos("PDOS_DFT.npy")
@@ -142,43 +139,46 @@ save_pdos("PDOS_DFT.npy")
 
 se_corr = StackSelfEnergy([fock, hartree, se_xc, se_Fcore])
 gf.selfenergies.append((slice(None), ExpandSelfEnergy(gf.S, se_corr, index_p[index_c])))
+
 # HF
 hartree.initialize(D0)
-fock.update(D0)
 
-# Mix Density Matrix
-i = 1
-Nc = len(index_c)
-
-
-def distance(D_inp):
+i = 0
+def step(D0_inp):
     global i
 
-    D_inp = D_inp.reshape((Nc, Nc))
-    hartree.update(D_inp)
-    fock.update(D_inp)
-    gw.update_correlation()
+    D1_inp = project(D0_inp)
+    hartree.update(D1_inp)
+    fock.update(D1_inp)
 
     gf1.update(callback=store_1d)
-    D_out = gf1.get_density_matrix()
-    N1 = 2.0 * D_out.dot(gf1.gf0.S).real.trace()
+    D0_out = gf0.get_density_matrix()
+    D1_out = project(D0_out)
+    N1 = 2.0 * D1_out.dot(S1).real.trace()
     log.info(f"# of electrons : {N1}")
     save_1d(DOS, f"DOS_G{i}W{i}.npy")
     save_1d(T, f"DOS_G{i}W{i}.npy")
     save_pdos(f"PDOS_G{i}W{i}.npy")
+    if comm.rank == 0: np.save('D0',D0_out)
 
     i += 1
-    eps = D_out - D_inp
+    eps = D0_out - D0_inp
 
     return eps
 
+D_inp = D0
+D_out = broyden1(
+    step, xin=D0, reduction_method="svd", max_rank=10, f_tol=0.1
+)
 
-try:
-    D_out = broyden1(
-        distance, xin=D0.flat, reduction_method="svd", max_rank=5, maxiter=15
-    ).x
-except:
-    pass
-
-if comm.rank == 0:
-    np.save("D_out", D_out)
+# GW@HF
+gw.update_correlation()
+se_corr.selfenergies.append(gw)
+gf1.update(callback=store_1d)
+D0 = gf0.get_density_matrix()
+D1 = project(D0)
+N1 = 2.0 * D1.dot(S1).real.trace()
+log.info(f"# of electrons : {N1}")
+save_1d(DOS, f"DOS_G{i}W{i}.npy")
+save_1d(T, f"DOS_G{i}W{i}.npy")
+save_pdos(f"PDOS_G{i}W{i}.npy")
