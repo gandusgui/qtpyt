@@ -41,7 +41,7 @@ def order_indices(basis, N, order="xyz", positions=None):
     repeated = basis.repeat(N)
     # Get map from repeated to target order.
     if positions is not None:
-        r2o = cdist(repeated.atoms.positions, positions).argmin(1)
+        r2o = cdist(repeated.atoms.positions, positions).argmin(0)
     else:
         positions = repeated.atoms.positions.round(3)
         r2o = argsort(positions, order)
