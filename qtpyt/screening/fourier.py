@@ -47,7 +47,7 @@ def fourier_integral(f, delta, N, sign=1, data=None):
     return F
 
 
-@njit(["(c16[::1],c16[::1],c16[:,::1],c16[::1],i8)"], parallel=True, cache=True)
+@njit(["(c16[::1],c16[::1],c16[:,::1],c16[::1],i8)"], parallel=True, cache=False)
 def _dftshift(f, W, cor, endpts, sign):
 
     if sign == 1:
@@ -90,7 +90,7 @@ def dftcor(theta):
     return W, cor
 
 
-@njit(["(b1[::1],c16[::1],c16[:,::1],f8[::1])"], parallel=True, cache=True)
+@njit(["(b1[::1],c16[::1],c16[:,::1],f8[::1])"], parallel=True, cache=False)
 def _dftcor(mask, W, cor, theta):
 
     for i in prange(len(mask)):
