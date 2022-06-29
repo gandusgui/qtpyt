@@ -227,7 +227,7 @@ class PulayMixer:
         self.N = N
         self.inp = []  # ArrayList(N)
         self.out = []  # ArrayList(N)
-        self.eps = []
+        self.err = []
         self.coeff = None
 
     def _append(self, G_list, G):
@@ -243,17 +243,17 @@ class PulayMixer:
         """Append output."""
         self._append(self.out, D)
         # Compute inner product with all previous (and current) residuals.
-        # N = len(self.out)
-        # i = N - 1
-        # eps = [None] * N
-        # for j in range(N):
-        #     eps[j] = np.vdot(self.out[i] - self.inp[i], self.out[j] - self.inp[j]).real
-        # # Append lower(upper) triangular entries of Pulay matrix.
-        # self.eps.append(eps)
-        # if len(self.eps) > self.N:
-        #     self.eps.pop(0)  # Discard row
-        #     for eps in self.eps[:-1]:
-        #         eps.pop(0)  # Discard column
+        N = len(self.out)
+        i = N - 1
+        err = [None] * N
+        for j in range(N):
+            err[j] = np.vdot(self.out[i] - self.inp[i], self.out[j] - self.inp[j]).real
+        # Append lower(upper) triangular entries of Pulay matrix.
+        self.err.append(err)
+        if len(self.err) > self.N:
+            self.err.pop(0)  # Discard row
+            for err in self.err[:-1]:
+                err.pop(0)  # Discard column
 
     def compute_new_coeff(self):
         """Compute Pulay's mixing coefficients."""
@@ -266,17 +266,17 @@ class PulayMixer:
         A[:N, N] = 1
         B[N] = 1
         # Fill lower triangular.
-        for i in range(N):
-            for j in range(i + 1):
-                A[i, j] = A[j, i] = np.vdot(
-                    self.out[i] - self.inp[i], self.out[j] - self.inp[j],
-                ).real
-        # for i, eps in enumerate(self.eps):
-        #     A[i, : i + 1] = eps
+        # for i in range(N):
+        #     for j in range(i + 1):
+        #         A[i, j] = A[j, i] = np.vdot(
+        #             self.out[i] - self.inp[i], self.out[j] - self.inp[j],
+        #         ).real
+        for i, err in enumerate(self.err):
+            A[i, : i + 1] = err
         # Fill symmetric.
         # A[N, :N] = A[:N, N] = 1.0
         # A[:N, N] = 1.0
-        # tri2full(A)
+        tri2full(A)
         # A = comm_sum(A)
         self.coeff = np.linalg.solve(A, B)[:N]
         self.A = A
