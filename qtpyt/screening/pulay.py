@@ -230,6 +230,12 @@ class PulayMixer:
         self.err = []
         self.coeff = None
 
+    @property
+    def eps(self):
+        if not hasattr(self, "A"):
+            return np.inf
+        return self.A[-2, -2]
+
     def _append(self, G_list, G):
         G_list.append(G)
         if len(G_list) > self.N:
@@ -301,12 +307,12 @@ class PulayMixer:
     def __call__(self, func, D_inp, tol=1e-5, max_iter=100) -> Any:
         self.append_input(D_inp)
         iter = 0
-        self.eps = np.inf
+        # self.eps = np.inf
         while self.eps > tol and iter < max_iter:
             iter += 1
             D_out = func(D_inp)
             self.append_output(D_out)
-            self.eps = abs((D_out - D_inp).real.sum())
+            # self.eps = abs((D_out - D_inp).real.sum())
             D_inp = self.compute_new_input()
             self.append_input(D_inp)
         return D_inp
