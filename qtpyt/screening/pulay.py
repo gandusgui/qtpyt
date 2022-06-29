@@ -228,6 +228,7 @@ class PulayMixer:
         self.inp = []  # ArrayList(N)
         self.out = []  # ArrayList(N)
         self.eps = []
+        self.coeff = None
 
     def _append(self, G_list, G):
         G_list.append(G)
@@ -242,34 +243,43 @@ class PulayMixer:
         """Append output."""
         self._append(self.out, D)
         # Compute inner product with all previous (and current) residuals.
-        N = len(self.out)
-        i = N - 1
-        eps = [None] * N
-        for j in range(N):
-            eps[j] = np.vdot(self.out[i] - self.inp[i], self.out[j] - self.inp[j]).real
-        # Append lower(upper) triangular entries of Pulay matrix.
-        self.eps.append(eps)
-        if len(self.eps) > self.N:
-            self.eps.pop(0)  # Discard row
-            for eps in self.eps[:-1]:
-                eps.pop(0)  # Discard column
+        # N = len(self.out)
+        # i = N - 1
+        # eps = [None] * N
+        # for j in range(N):
+        #     eps[j] = np.vdot(self.out[i] - self.inp[i], self.out[j] - self.inp[j]).real
+        # # Append lower(upper) triangular entries of Pulay matrix.
+        # self.eps.append(eps)
+        # if len(self.eps) > self.N:
+        #     self.eps.pop(0)  # Discard row
+        #     for eps in self.eps[:-1]:
+        #         eps.pop(0)  # Discard column
 
     def compute_new_coeff(self):
         """Compute Pulay's mixing coefficients."""
+        from random import random
+
         N = len(self.out)
         A = np.zeros((N + 1, N + 1))
         B = np.zeros(N + 1)
-        B[N] = 1.0
+        A[N, :N] = 1
+        A[:N, N] = 1
+        B[N] = 1
         # Fill lower triangular.
-        for i, eps in enumerate(self.eps):
-            A[i, : i + 1] = eps
+        for i in range(N):
+            for j in range(i + 1):
+                A[i, j] = A[j, i] = np.vdot(
+                    self.out[i] - self.inp[i], self.out[j] - self.inp[j],
+                ).real
+        # for i, eps in enumerate(self.eps):
+        #     A[i, : i + 1] = eps
         # Fill symmetric.
-        tri2full(A)
+        # A[N, :N] = A[:N, N] = 1.0
+        # A[:N, N] = 1.0
+        # tri2full(A)
         # A = comm_sum(A)
-        A[:N, N] = 1.0
-        A[N, :N] = 1.0
+        self.coeff = np.linalg.solve(A, B)[:N]
         self.A = A
-        self.coeff = np.linalg.solve(A, B)[:-1]
         return self.coeff
 
     def compute_new_input(self, new=None):
@@ -280,19 +290,23 @@ class PulayMixer:
             new[:] = 0.0
         coeff = self.compute_new_coeff()
         for i in range(len(coeff)):
-            new += (1 - self.alpha) * coeff[i] * self.inp[i] + self.alpha * coeff[
-                i
-            ] * self.out[i]
+            # new += (1 - self.alpha) * coeff[i] * self.inp[i] + self.alpha * coeff[
+            #     i
+            # ] * self.out[i]
+            new += self.coeff[i] * (
+                self.inp[i] + self.alpha * (self.out[i] - self.inp[i])
+            )
         return new
 
     def __call__(self, func, D_inp, tol=1e-5, max_iter=100) -> Any:
         self.append_input(D_inp)
         iter = 0
-        eps = np.inf
-        while eps > tol and iter < max_iter:
+        self.eps = np.inf
+        while self.eps > tol and iter < max_iter:
             iter += 1
             D_out = func(D_inp)
             self.append_output(D_out)
-            eps = abs((D_out - D_inp).real.sum())
+            self.eps = abs((D_out - D_inp).real.sum())
             D_inp = self.compute_new_input()
             self.append_input(D_inp)
+        return D_inp
