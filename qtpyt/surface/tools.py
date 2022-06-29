@@ -37,6 +37,30 @@ def remove_pbc(basis, A_kMM, direction="x", eps=-1e-3):
     A_kMM *= mask_ji[None, :]
 
 
+def map_B2A(pos_A, pos_B):
+    """Find indices on `B` in `A`.
+    
+    Example:
+          ----            ----
+         |   d|          |   d|
+    A=   |c   | ,   B=   |b   | 
+         |   b|          |   c|
+         |a   |          |a   | 
+          ----            ----
+    
+    A = B[map_B2A(A, B)]
+    """
+    B2A = cdist(pos_A, pos_B, metric="cityblock").argmin(1)
+    return B2A
+
+
+def map_supercell(bsc, bcc):
+    cc2sc = map_B2A(bsc.atoms.positions, bcc.atoms.positions)
+    cc2sc.sort()
+    sc2cc = map_B2A(bcc[cc2sc].atoms.positions, bsc.atoms.positions)
+    return bsc.get_indices(sc2cc)
+
+
 def order_indices(basis, N, order="xyz", positions=None):
     repeated = basis.repeat(N)
     # Get map from repeated to target order.
