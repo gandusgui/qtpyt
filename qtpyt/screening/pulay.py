@@ -253,7 +253,10 @@ class PulayMixer:
         i = N - 1
         err = [None] * N
         for j in range(N):
-            err[j] = np.vdot(self.out[i] - self.inp[i], self.out[j] - self.inp[j]).real
+            err[j] = np.inner(
+                (self.out[i] - self.inp[i]).diagonal(),
+                (self.out[j] - self.inp[j]).diagonal(),
+            ).real
         # Append lower(upper) triangular entries of Pulay matrix.
         self.err.append(err)
         if len(self.err) > self.N:
@@ -304,13 +307,13 @@ class PulayMixer:
             )
         return new
 
-    def __call__(self, func, D_inp, tol=1e-5, max_iter=100) -> Any:
+    def __call__(self, func, D_inp, tol=1e-5, max_iter=100, **kwargs) -> Any:
         self.append_input(D_inp)
         iter = 0
         # self.eps = np.inf
         while self.eps > tol and iter < max_iter:
             iter += 1
-            D_out = func(D_inp)
+            D_out = func(D_inp, **kwargs)
             self.append_output(D_out)
             # self.eps = abs((D_out - D_inp).real.sum())
             D_inp = self.compute_new_input()
