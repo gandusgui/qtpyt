@@ -1,7 +1,8 @@
 import numpy as np
-from qtpyt.elph.hilbert import hilbert
+from qtpyt.elph.hilbert import hilbert, hilbert_kernel_interpolate
 from qtpyt.screening.distgf import DistGreenFunction
-from qtpyt.screening.langreth import LangrethPair
+from qtpyt.screening.langreth import LangrethPair, get_retarded_from_lesser_and_greater
+from qtpyt.screening.tools import increase2pow2, roll
 
 kB = 8.6e-5  # Boltzmann
 nB = lambda w, kt: 1.0 / (np.exp(w / kt) - 1.0)
@@ -40,17 +41,20 @@ class ElphFockSelfEnergy(LangrethPair):
     """
 
     def __init__(
-        self, gf: DistGreenFunction, g_lii: np.ndarray, w_l: np.ndarray
+        self, gf: DistGreenFunction, g_lii: np.ndarray, w_l: np.ndarray, oversample=10
     ) -> None:
         self.gf = gf
         self.g_lii = g_lii
         self.w_l = w_l
         self.nph_l = nB(w_l, self.gf.gf0.kt)
-        super().__init__(gf.global_energies, gf.no, dtype=complex)
+        super().__init__(
+            gf.global_energies, gf.no, dtype=complex, oversample=oversample
+        )
         # We need retarded and lesser
         self.arrays["r"] = self.arrays.pop("g")
+        setzeros(*(a for a in self.arrays.values()))
 
-    def update_elph(self):
+    def update(self):
 
         Gl = self.collect_energies(self.gf.arrays["l"])
         Gg = self.collect_energies(self.gf.arrays["g"])
@@ -73,25 +77,37 @@ class ElphFockSelfEnergy(LangrethPair):
             setzeros(Gl_minus, Gl_plus, Gg_minus, Gg_plus)
 
             # interpolate
-            for w in (1 - r, r):
-                w = round(w, 5)
-                if w > 0.0:
-                    translate(Gl, s, Gl_minus, w)
-                    translate(Gg, s, Gg_minus, w)
-                    translate(Gl, -s, Gl_plus, w)
-                    translate(Gg, -s, Gg_plus, w)
+            for weight in (1 - r, r):
+                if round(weight, 5) > 0.0:
+                    translate(Gl, s, Gl_minus, weight)
+                    translate(Gg, s, Gg_minus, weight)
+                    translate(Gl, -s, Gl_plus, weight)
+                    translate(Gg, -s, Gg_plus, weight)
                 s += 1
 
-            l = self.collect_orbitals(nph * Gl_minus + (1 + nph) * Gl_plus)
-            g = self.collect_orbitals(nph * Gg_minus + (1 + nph) * Gg_plus)
+            l = nph * Gl_minus + (1 + nph) * Gl_plus
+            g = nph * Gg_minus + (1 + nph) * Gg_plus
+
+            # l = roll(l, -self.zero_index)
+            # g = roll(g, -self.zero_index)
+
+            # r = get_retarded_from_lesser_and_greater(
+            #     l, g, self.global_energies, g, self.oversample
+            # )
+
+            # l = roll(l, self.zero_index)
+            # r = roll(r, self.zero_index)
+            r = 0.5 * (g - l)
+            r -= 1.0j * hilbert(r, oversample=self.oversample)
+
+            l = self.collect_orbitals(l)
+            r = self.collect_orbitals(r)
 
             l = np.einsum("ij,ejk,kl->eil", g_ii, l, g_ii, optimize=True)
-            g = np.einsum("ij,ejk,kl->eil", g_ii, l, g_ii, optimize=True)
-
-            Sd = 0.5 * (g - l)
+            r = np.einsum("ij,ejk,kl->eil", g_ii, r, g_ii, optimize=True)
 
             Sl += l
-            Sr += Sd - 1.0j * hilbert(Sd)
+            Sr += r
 
     def retarded(self, energy):
         return self.arrays["r"][np.searchsorted(self.energies, energy)]

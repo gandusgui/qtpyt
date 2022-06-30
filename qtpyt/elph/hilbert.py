@@ -1,5 +1,6 @@
 import numpy as np
 from qtpyt.screening import fft, ifft
+from qtpyt.screening.tools import increase2pow2
 from scipy import ifft
 
 """
@@ -47,52 +48,23 @@ def hilbert_kernel_interpolate(n):
     return -fft(ker) / np.pi
 
 
-def hilbert(f, ker=None, nfft=None, axis=0, kerneltype="interpolate", translate=0):
-    """Perform Hilbert transform *f* along specified *axis*. The transform is
-       made as a convolution of *f* with the Hilbert kernel.
-       
-       *ker* is the Hilbert kernel, which will be calculated if set to None.
-       
-       *nfft* is the number of grid points used in the fft. If *nfft* is larger
-       than *f* along the transform axis, *f* will be zero-padded to make up
-       the difference. If *nfft* is smaller, the first *nfft* elements of *f*
-       will be used. *nfft* defaults to two times the the length of *f* along
-       *axis*.
-       
-       *kerneltype* specifies the kerneltype, and can be one of 'interpolate'
-       or 'simple'.
-       
-       *translate* is the number of grid points *f* should be shifted. This can
-       be a non-integer amount. translate=10 means that f(x + 10) is
-       transformed instead of f(x).
-    """
+def hilbert(f, oversample=10, axis=0, ker=None, kerneltype="interpolate"):
+    """Perform Hilbert transform."""
     # Number of transform grid points
     n = f.shape[axis]
 
-    # Number of grid points in fft
-    if nfft == None:
-        nfft = 2 * n
-
     # Generate new kernel if needed
     if ker == None:
+        nfft = increase2pow2(oversample * n)
         ker = eval("hilbert_kernel_" + kerneltype)(nfft)
+    else:
+        assert ker.size == nfft
 
     # Reshape kernel
     ker_shape = [1,] * len(f.shape)
     ker_shape[axis] = nfft
     ker.shape = tuple(ker_shape)
 
-    # Construct translation operator
-    if translate == 0:
-        trans = 1
-    else:
-        trans = (np.arange(nfft) + (nfft - 1) / 2) % nfft - (nfft - 1) / 2
-        #          nfft = 8 ->       [ 0  1  2  3  4 -3 -2 -1]
-        #       trans = (np.arange(nfft) + nfft / 2) % nfft - nfft / 2
-        #          nfft = 8 ->       [ 0  1  2  3 -4 -3 -2 -1]
-        trans = np.exp(1.0j * translate * 2 * np.pi / nfft * trans)
-        trans.shape = ker.shape
-
     # Make convolution of f and kernel
-    hil = ifft(fft(f, n=nfft, axis=axis) * ker * trans, axis=axis)
+    hil = ifft(fft(f, n=nfft, axis=axis) * ker, axis=axis)
     return hil[0:n]
