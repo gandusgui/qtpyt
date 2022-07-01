@@ -1,4 +1,5 @@
-from typing import Any
+from types import MethodType
+from typing import Any, Callable, Union
 
 import numpy as np
 from qtpyt import xp
@@ -99,7 +100,7 @@ class SelfEnergy(BaseSelfEnergy):
 class ConstSelfEnergy:
     """Constant selfenergy."""
 
-    def __init__(self, *, Sigma=None, shape=None) -> None:
+    def __init__(self, Sigma=None, shape=None) -> None:
         if Sigma is None:
             Sigma = xp.zeros(shape, complex)
         self.Sigma = Sigma
@@ -142,3 +143,19 @@ class StackSelfEnergy(ConstSelfEnergy):
         for selfenergy in self.selfenergies:
             self.Sigma += selfenergy.retarded(energy)
         return super().retarded(energy)
+
+
+def ZeroFilter(selfenergy: Union[BaseSelfEnergy, ConstSelfEnergy], func: Callable):
+
+    Sigma = np.zeros_like(selfenergy.Sigma)
+
+    def filter(self, energy):
+        if func(energy):
+            out = self._retarded(energy)
+            return out
+        else:
+            return Sigma
+
+    selfenergy._retarded = getattr(selfenergy, "retarded")
+    selfenergy.retarded = MethodType(filter, selfenergy)
+    return selfenergy

@@ -86,17 +86,8 @@ class ElphFockSelfEnergy(LangrethPair):
                 s += 1
 
             l = nph * Gl_minus + (1 + nph) * Gl_plus
-            g = nph * Gg_minus + (1 + nph) * Gg_plus
+            g = nph * Gg_plus + (1 + nph) * Gg_minus
 
-            # l = roll(l, -self.zero_index)
-            # g = roll(g, -self.zero_index)
-
-            # r = get_retarded_from_lesser_and_greater(
-            #     l, g, self.global_energies, g, self.oversample
-            # )
-
-            # l = roll(l, self.zero_index)
-            # r = roll(r, self.zero_index)
             r = 0.5 * (g - l)
             r -= 1.0j * hilbert(r, oversample=self.oversample)
 
