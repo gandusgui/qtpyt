@@ -3,6 +3,7 @@ from math import pi
 from typing import Any
 
 import numpy as np
+from qtpyt.elph.hilbert import hilbert
 from qtpyt.parallel.egrid import GridDesc
 from qtpyt.screening import fft, ifft
 from qtpyt.screening.fourier import fourier_integral, get_fourier_data
@@ -193,17 +194,25 @@ class LangrethPair(GridDesc):
             zero_index = self.zero_index
         l = self.collect_energies(self.arrays["l"])
         g = self.collect_energies(self.arrays["g"])
-        l = roll(ifft(l, axis=0), zero_index)
-        g = roll(ifft(g, axis=0), zero_index)
-        # l = ifft(l, axis=0)
-        # g = ifft(g, axis=0)
-        get_retarded_from_lesser_and_greater(
-            l, g, self.global_energies, l, oversample=self.oversample
-        )
-        # l = roll(l, self.zero_index)
-        # g = roll(g, self.zero_index)
+
+        ####  -1-  ####
+        l = ifft(l, axis=0)
+        g = ifft(g, axis=0)
+        r = 0.5 * (g - l)
+        r -= 1.0j * hilbert(r, oversample=self.oversample)
+        ###############
+
+        ####  -2-  ####
+        # l = roll(ifft(l, axis=0), zero_index)
+        # g = roll(ifft(g, axis=0), zero_index)
+        # get_retarded_from_lesser_and_greater(
+        #     l, g, self.global_energies, l, oversample=self.oversample
+        # )
+        # r = l
+        ###############
+
         self.arrays["r"] = self.arrays.pop("l")
-        self.collect_orbitals(l, self.arrays["r"])
+        self.collect_orbitals(r, self.arrays["r"])
         self.collect_orbitals(g, self.arrays["g"])
 
     def __lshift__(self, other):

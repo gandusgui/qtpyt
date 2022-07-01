@@ -55,7 +55,10 @@ def hilbert(f, oversample=10, axis=0, ker=None, kerneltype="interpolate"):
 
     # Generate new kernel if needed
     if ker == None:
-        nfft = increase2pow2(oversample * n)
+        if oversample > 0:
+            nfft = increase2pow2(oversample * n)
+        else:
+            nfft = n    
         ker = eval("hilbert_kernel_" + kerneltype)(nfft)
     else:
         assert ker.size == nfft
