@@ -58,7 +58,7 @@ def map_supercell(bsc, bcc):
     cc2sc = map_B2A(bsc.atoms.positions, bcc.atoms.positions)
     cc2sc.sort()
     sc2cc = map_B2A(bcc[cc2sc].atoms.positions, bsc.atoms.positions)
-    return bsc.get_indices(sc2cc)
+    return bsc.get_indices(sc2cc), sc2cc
 
 
 def order_indices(basis, N, order="xyz", positions=None):

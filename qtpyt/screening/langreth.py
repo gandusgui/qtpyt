@@ -9,8 +9,10 @@ from qtpyt.screening import fft, ifft
 from qtpyt.screening.fourier import fourier_integral, get_fourier_data
 from qtpyt.screening.tools import (
     get_extended_energies,
+    get_interp_indices,
     increase2pow2,
     lesser_from_retarded,
+    linear_interp,
     roll,
 )
 
@@ -170,10 +172,18 @@ class LangrethPair(GridDesc):
     def convert_domain(self):
         """Convert pair from/to energy/time."""
         # x(t), y(t) <</>> x(e), y(e)
-        _fft = fft if self.domain == "e" else ifft
+        # _fft = fft if self.domain == "e" else ifft
+        # if self.domain == "e":
+        # indices = get_interp_indices(self.global_energies)
+        # indices = (self.global_energies <= -50.0) | (self.global_energies >= 50.0)
         for a in self.arrays.values():
             A = self.collect_energies(a)
-            A = _fft(A, axis=0)
+            if self.domain == "e":
+                # A[indices] = 0.0
+                A = fft(A, axis=0)
+                # A = fft(linear_interp(A[indices], indices, self.ne), axis=0)
+            else:
+                A = ifft(A, axis=0)
             self.collect_orbitals(A, a)
 
     @assert_domain("e")
@@ -196,19 +206,19 @@ class LangrethPair(GridDesc):
         g = self.collect_energies(self.arrays["g"])
 
         ####  -1-  ####
-        l = ifft(l, axis=0)
-        g = ifft(g, axis=0)
-        r = 0.5 * (g - l)
-        r -= 1.0j * hilbert(r, oversample=self.oversample)
+        # l = ifft(l, axis=0)
+        # g = ifft(g, axis=0)
+        # r = 0.5 * (g - l)
+        # r -= 1.0j * hilbert(r, oversample=self.oversample)
         ###############
 
         ####  -2-  ####
-        # l = roll(ifft(l, axis=0), zero_index)
-        # g = roll(ifft(g, axis=0), zero_index)
-        # get_retarded_from_lesser_and_greater(
-        #     l, g, self.global_energies, l, oversample=self.oversample
-        # )
-        # r = l
+        l = roll(ifft(l, axis=0), zero_index)
+        g = roll(ifft(g, axis=0), zero_index)
+        get_retarded_from_lesser_and_greater(
+            l, g, self.global_energies, l, oversample=self.oversample
+        )
+        r = l
         ###############
 
         self.arrays["r"] = self.arrays.pop("l")

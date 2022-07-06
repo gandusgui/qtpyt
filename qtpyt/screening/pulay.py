@@ -307,15 +307,20 @@ class PulayMixer:
             )
         return new
 
-    def __call__(self, func, D_inp, tol=1e-5, max_iter=100, **kwargs) -> Any:
-        self.append_input(D_inp)
-        iter = 0
-        # self.eps = np.inf
-        while self.eps > tol and iter < max_iter:
-            iter += 1
-            D_out = func(D_inp, **kwargs)
-            self.append_output(D_out)
-            # self.eps = abs((D_out - D_inp).real.sum())
-            D_inp = self.compute_new_input()
+    def __call__(self, func, D_inp, tol=1e-5, max_iter=100, max_outer=1, **kwargs) -> Any:
+        iter_outer = 0
+        while self.eps > tol and iter_outer < max_outer:
+            iter = 0
+            self.inp = []
+            self.out = []
+            self.err = []
             self.append_input(D_inp)
+            while self.eps > tol and iter < max_iter:
+                iter += 1
+                D_out = func(D_inp, **kwargs)
+                self.append_output(D_out)
+                # self.eps = abs((D_out - D_inp).real.sum())
+                D_inp = self.compute_new_input()
+                self.append_input(D_inp)
+            iter_outer += 1
         return D_inp

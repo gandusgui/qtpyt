@@ -74,7 +74,7 @@ def translate_along_axis(array, translation):
 def roll(a, shift):
     """Translate and array in place."""
     n = a.shape[0]
-    shift = shift%n
+    shift = shift % n
     perm = np.roll(np.arange(n), shift)
     tmpa = np.atleast_1d(np.empty_like(a[0]))
 
@@ -147,3 +147,43 @@ def interpolate(X, energies, indx2eval):
     X_interp = interp1d(energies[indx], X[indx], kind="slinear", axis=0)
     for e, energy in zip(indx2eval, energies[indx2eval]):
         X[e] = X_interp(energy)
+
+
+def get_interp_indices(energies):
+    a = 2
+    b = energies[0] / 10.0
+    c = energies[-1] / 10.0
+    indices = []
+    count = 0
+    while count < len(energies):
+        indices.append(count)
+        x = energies[count]
+        if x <= 0:
+            y = int(1 + pow(abs(x), a) / pow(abs(b), a))
+        else:
+            y = int(1 + pow(abs(x), a) / pow(abs(c), a))
+        count += y
+    return np.array(indices)
+
+
+def linear_interp(a1, indices, size):
+    # Interpolate from array a1 to array a2. a1 is sampled on indices
+    # Treat first index as special case
+
+    # Don't do anything if a1 and a2 are identical
+    if len(a1) == size:
+        return a1
+    s = (size,) + a1.shape[1:]
+    a2 = np.zeros(s, a1.dtype)
+    slope0 = (a1[1] - a1[0]) / (1.0 * indices[1] - indices[0])
+    for i in range(indices[0]):
+        a2[i] = a1[0] + slope0 * (1.0 * i - indices[0])
+    for i in range(1, len(indices)):
+        for j in range(indices[i - 1], indices[i]):
+            a2[j] = a1[i - 1] + (a1[i] - a1[i - 1]) * (1.0 * j - indices[i - 1]) / (
+                indices[i] - indices[i - 1]
+            )
+    slope1 = (a1[-1] - a1[-2]) / (1.0 * indices[-1] - indices[-2])
+    for i in range(indices[-1], a2.shape[0]):
+        a2[i] = a1[-1] + slope1 * (1.0 * i - indices[-1])
+    return a2
