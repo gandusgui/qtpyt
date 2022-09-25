@@ -55,12 +55,12 @@ G , F , E , A
 
 
 """
-from numba import njit, prange
 import numpy as np
+from numba import njit, prange
 
 
 @njit(
-    "(c16[:,:,:],f8[:,:],i8,i8,c16[:,:,:,:])", cache=True, parallel=True, fastmath=True
+    "(c16[:,:,:],f8[:,:],i8,i8,c16[:,:,:,:])", cache=False, parallel=True, fastmath=True
 )
 def _bloch_unfold(A, kpts, m, n, out):
     """Unfold k-matrices to supercell.
