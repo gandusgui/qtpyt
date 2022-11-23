@@ -6,7 +6,7 @@ import scipy.linalg as la
 # Physical quantities
 from scipy.constants import e, k
 
-from qtpyt.base._kernels import dagger, dottrace
+from qtpyt.base._kernels import dagger, dotdiag, dottrace
 from qtpyt.base.greenfunction import GreenFunction as GF
 from qtpyt.block_tridiag.greenfunction import GreenFunction as BTGF
 
@@ -136,11 +136,11 @@ def integrate_pdos(G, mu=0, T=300, nzp=100, R=1e10):
     G.eta = 0.0
 
     R = 1e10
-    mu_0 = 1j * R * G.apply_retarded(1j * R, G.S).diagonal()
+    mu_0 = 1j * R * dotdiag(G.retarded(1j * R), G.S)
 
     mu_1 = complex(0)
     for i in range(N):
-        mu_1 += G.apply_retarded(a_p[i], G.S).diagonal() * Rp[i]
+        mu_1 += dotdiag(G.retarded(a_p[i]), G.S) * Rp[i]
     mu_1 *= -1j * 4 / beta
 
     rho = np.real(mu_0) + np.imag(mu_1)
