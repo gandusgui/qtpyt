@@ -62,9 +62,9 @@ VERSION = "0.5.3"
 URL = "https://gitlab.ethz.ch/ggandus/qtpyt.git"
 
 AUTHOR = "Guido Gandus"
-EMAIL = "ggandus@ethz.ch"
+EMAIL = "gandusgui@gmail.com"
 
-LICENSE = "Apache 2.0"
+LICENSE = "MIT License"
 
 
 def readme():
