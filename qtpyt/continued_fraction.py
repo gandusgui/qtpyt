@@ -8,6 +8,7 @@ from scipy.constants import e, k
 
 from qtpyt.base._kernels import dagger, dotdiag, dottrace
 from qtpyt.base.greenfunction import GreenFunction as GF
+from qtpyt.basis import Basis
 from qtpyt.block_tridiag.greenfunction import GreenFunction as BTGF
 
 """References:
@@ -67,63 +68,7 @@ def zero_fermi(nzp):
 
 
 @singledispatch
-def integrate_dos(G, mu=0, T=300, nzp=100, R=1e10):
-
-    zp, Rp = zero_fermi(nzp)
-    N = nzp
-
-    k_B = k / e  # Boltzmann constant [eV/K] 8.6173303e-05
-    beta = 1 / (k_B * T)
-    a_p = mu + 1j * zp / beta
-
-    eta = G.eta
-    G.eta = 0.0
-
-    R = 1e10
-    mu_0 = 1j * R * dottrace(G.retarded(1j * R), G.S)
-
-    mu_1 = complex(0)
-    for i in range(N):
-        mu_1 += dottrace(G.retarded(a_p[i]), G.S) * Rp[i]
-    mu_1 *= -1j * 4 / beta
-
-    rho = np.real(mu_0) + np.imag(mu_1)
-
-    G.eta = eta
-
-    return rho
-
-
-@integrate_dos.register(BTGF)
-def _(G, mu=0, T=300, nzp=100, R=1e10):
-
-    zp, Rp = zero_fermi(nzp)
-    N = nzp
-
-    k_B = k / e  # Boltzmann constant [eV/K] 8.6173303e-05
-    beta = 1 / (k_B * T)
-    a_p = mu + 1j * zp / beta
-
-    eta = G.eta
-    G.eta = 0.0
-
-    R = 1e10
-    mu_0 = 1j * R * G.retarded(1j * R).dottrace(G.S)
-
-    mu_1 = complex(0)  # np.zeros(len(mu_0),complex)
-    for i in range(N):
-        mu_1 += G.retarded(a_p[i]).dottrace(G.S) * Rp[i]
-    mu_1 *= -1j * 4 / beta
-
-    rho = np.real(mu_0) + np.imag(mu_1)
-
-    G.eta = eta
-
-    return rho
-
-
-@singledispatch
-def integrate_pdos(G, mu=0, T=300, nzp=100, R=1e10):
+def _integrate(G, mu=0, T=300, nzp=100, R=1e10):
 
     zp, Rp = zero_fermi(nzp)
     N = nzp
@@ -150,7 +95,7 @@ def integrate_pdos(G, mu=0, T=300, nzp=100, R=1e10):
     return rho
 
 
-@integrate_pdos.register(BTGF)
+@_integrate.register(BTGF)
 def _(G, mu=0, T=300, nzp=100, R=1e10):
 
     zp, Rp = zero_fermi(nzp)
@@ -166,7 +111,7 @@ def _(G, mu=0, T=300, nzp=100, R=1e10):
     R = 1e10
     mu_0 = 1j * R * G.retarded(1j * R).dotdiag(G.S)
 
-    mu_1 = np.zeros(len(mu_0), complex)
+    mu_1 = complex(0)  # np.zeros(len(mu_0),complex)
     for i in range(N):
         mu_1 += G.retarded(a_p[i]).dotdiag(G.S) * Rp[i]
     mu_1 *= -1j * 4 / beta
@@ -178,27 +123,17 @@ def _(G, mu=0, T=300, nzp=100, R=1e10):
     return rho
 
 
-def density_matrix(G, mu=0, T=300, nzp=100, R=1e10):
-    zp, Rp = zero_fermi(nzp)
-    N = nzp
+def get_ao_charge(G, mu=0, T=300, nzp=100, R=1e10):
+    """Get orbital charge density."""
+    return _integrate(G, mu, T, nzp, R)
 
-    k_B = k / e  # Boltzmann constant [eV/K] 8.6173303e-05
-    beta = 1 / (k_B * T)
-    a_p = mu + 1j * zp / beta
 
-    eta = G.eta
-    G.eta = 0.0
+def get_atomic_charge(basis: Basis, G, mu=0, T=300, nzp=100, R=1e10):
+    """Get atomic charge density."""
+    rho = _integrate(G, mu, T, nzp, R)
+    return basis.sum_aos_atoms(rho)
 
-    R = 1e10
-    mu_0 = 1j * R * G.apply_retarded(1j * R, G.S)
 
-    mu_1 = complex(0)
-    for i in range(N):
-        mu_1 += G.apply_retarded(a_p[i], G.S) * Rp[i]
-    mu_1 *= -1j * 4 / beta
-
-    rho = np.real(mu_0) + np.imag(mu_1)
-
-    G.eta = eta
-
-    return rho
+def get_total_charge(G, mu=0, T=300, nzp=100, R=1e10):
+    """Get total charge density."""
+    return _integrate(G, mu, T, nzp, R).sum()
