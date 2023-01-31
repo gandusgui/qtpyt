@@ -2,6 +2,7 @@ from math import pi, sqrt
 
 # Also import numpy for array matrices
 import numpy as np
+
 from qtpyt import xp
 from qtpyt.parallel.egrid import GridDesc
 from qtpyt.parallel.tools import comm_sum
@@ -419,6 +420,62 @@ class cRPA(Constrained, WRPA):
         self.gfc.update_from_parent(self.gf)  # g<(t), g>(t)
         self.chi.update_polarization()  # Pr(e), P>(e)
         self.solve_unscreening()
+
+
+class cRPA2(Constrained, WRPA):
+    """Constrained RPA."""
+
+    def __init__(self, gf: DistGreenFunction, V_qq, U_pq=None, oversample=10) -> None:
+        # super().__init__(DistGreenFunction(gf, energies), V_qq, U_pq)
+        Constrained.__init__(self, gf, U_pq)
+        WRPA.__init__(self, gf.parent, V_qq, U_pq, oversample=oversample)
+        self.chi = Chi(self.gfc, oversample=oversample)
+
+        self.rotate = self._cut if U_pq is None else self._rot
+
+    def _cut(self, W, out):
+        out[:] = W.reshape(4 * (self.gf.no,))[self.ix4].reshape(2 * (len(self.chi.no),))
+        return out
+
+    def _rot(self, W, out):
+        return self.U_cq.dot(W, out=self.work).dot(self.U_cq.T, out=out)
+
+    @property
+    def W(self):
+        raise NotImplementedError("Not available with this method.")
+
+    @property
+    def U(self):
+        return self.chi.arrays["r"]
+
+    @assert_domain("e")
+    def screen_polarization(self):
+        """Set to zero the polarization of the constrained region."""
+        Pr = self.arrays["r"]
+        no = self.gf.no
+        rotate = lambda X, U: X
+        if self.U_pq is not None:
+            rotate = lambda X, U: U.dot(X).dot(U.T)
+        for e in range(self.energies.size):
+            P_pp = rotate(Pr[e], self.U_pq)
+            P_pp = P_pp.reshape((no,) * 4)
+            P_pp[self.ix4] = 0.0
+            P_pp = P_pp.reshape((no ** 2,) * 2)
+            Pr[e, ...] = rotate(P_pp, self.U_pq.T)
+
+    @assert_domain("e")
+    def solve_unscreening(self):
+        W = self.arrays["r"]
+        self.chi.arrays["r"] = self.chi.arrays.pop("l")
+        U = self.chi.arrays["r"]
+        for e in range(self.energies.size):
+            self.rotate(W[e], out=U[e])
+
+    def update_unscreening2(self):
+        self.update_polarization()  # Pr(e), P>(e)
+        self.screen_polarization()
+        self.solve_screening()  # Wr(e), W>(e)
+        self.solve_unscreening()  # Ur(e)
 
 
 class cRPA0(Constrained):
