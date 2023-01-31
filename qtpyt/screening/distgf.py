@@ -3,11 +3,12 @@ from math import pi
 from typing import TypeVar, Union
 
 import numpy as np
+
 from qtpyt import xp
 from qtpyt.base.greenfunction import GreenFunction
 from qtpyt.projector import ProjectedGreenFunction
 from qtpyt.screening.langreth import LangrethPair, assert_domain, change_domain
-from qtpyt.screening.tools import greater_from_retarded
+from qtpyt.screening.tools import greater_from_retarded, smooth
 
 T = TypeVar("T", bound="DistGreenFunction")
 
@@ -99,8 +100,11 @@ class DistGreenFunction(LangrethPair):
         Integral of the lesser green's function.
         This is equivalent to -1/pi Im{Gr}.
         """
-        Gl = self.arrays["l"]
-        return self.sum_energies(Gl, pre=-1.0j / (2 * np.pi))
+        gl = self.arrays["l"]
+        # Gl = self.collect_energies(gl)
+        # Gl = smooth(self.global_energies, Gl, 1.0, 6.0)
+        # self.collect_orbitals(Gl, gl)
+        return self.sum_energies(gl, pre=-1.0j / (2 * np.pi))
 
     @assert_domain("e")
     def get_dos(self, out=None, root=0):
@@ -120,13 +124,13 @@ class DistGreenFunction(LangrethPair):
                 * (self.arrays["g"][e] - self.arrays["l"][e]).dot(self.gf0.S).trace()
             ).real / (2 * np.pi)
         return self.gather_energies(out, root)
-    
+
     def get_num_electrons(self):
         """Get total number of electrons."""
         D = self.get_density_matrix()
         S = self.gf0.S
         # x2. degenerate spin
-        return 2. * D.dot(S).real.trace()
+        return 2.0 * D.dot(S).real.trace()
 
     def take_subspace(self, indices):
         """Build a distributed green's function for a subspace.

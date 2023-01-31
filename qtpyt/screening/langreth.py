@@ -3,18 +3,15 @@ from math import pi
 from typing import Any
 
 import numpy as np
+
 from qtpyt.elph.hilbert import hilbert
 from qtpyt.parallel.egrid import GridDesc
 from qtpyt.screening import fft, ifft
 from qtpyt.screening.fourier import fourier_integral, get_fourier_data
-from qtpyt.screening.tools import (
-    get_extended_energies,
-    get_interp_indices,
-    increase2pow2,
-    lesser_from_retarded,
-    linear_interp,
-    roll,
-)
+from qtpyt.screening.tools import (finer, get_extended_energies,
+                                   get_interp_indices, increase2pow2,
+                                   lesser_from_retarded, linear_interp, roll,
+                                   smooth)
 
 
 def get_retarded_from_lesser_and_greater(
@@ -180,6 +177,7 @@ class LangrethPair(GridDesc):
             A = self.collect_energies(a)
             if self.domain == "e":
                 # A[indices] = 0.0
+                # A = smooth(self.global_energies, A, 1.0, 6.0)
                 A = fft(A, axis=0)
                 # A = fft(linear_interp(A[indices], indices, self.ne), axis=0)
             else:

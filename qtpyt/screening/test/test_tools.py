@@ -1,11 +1,7 @@
 import numpy as np
-from qtpyt.screening.tools import (
-    greater_from_retarded,
-    lesser_from_retarded,
-    roll,
-    rotate,
-    translate_along_axis,
-)
+
+from qtpyt.screening.tools import (greater_from_retarded, lesser_from_retarded,
+                                   roll, rotate, smooth, translate_along_axis)
 
 
 def test_roll():
@@ -54,6 +50,13 @@ def test_greater_from_retarded():
     greater_from_retarded(r, l)
     actual = r
     np.testing.assert_allclose(actual, desired)
+
+
+def test_smooth():
+    x = np.arange(4)
+    A = np.arange(len(x) * 3 ** 2).reshape(len(x), 3, 3)
+    A2 = smooth(x, A, cutfreq=1, oversample=2)
+    np.testing.assert_allclose(A, A2)
 
 
 if __name__ == "__main__":

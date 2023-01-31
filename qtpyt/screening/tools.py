@@ -187,3 +187,48 @@ def linear_interp(a1, indices, size):
     for i in range(indices[-1], a2.shape[0]):
         a2[i] = a1[-1] + slope1 * (1.0 * i - indices[-1])
     return a2
+
+
+def finer(x, A, oversample=2):
+    """Increase number of samples for matrix A.
+
+    Parameters
+    ----------
+    x : 1D array_like
+        grid points
+    A : 3D array_like
+        1D array of 2D matries for each `x`-th point.
+    oversample : int, optional
+        decrease grid spacing by `n`, by default 2
+
+    Returns
+    -------
+    3D array_like
+        matrix array at finer grid points.
+    """
+    dx = x[1] - x[0]
+    dx /= oversample
+    x2 = np.arange(x[0], x[-1] + dx / 2.0, dx)
+    A2 = interp1d(x, A, kind="cubic", axis=0)(x2)
+    return x2, A2
+
+
+def smooth(x, A, cutfreq=10.0, oversample=2):
+    """Helper function to interpolate interacting self-energy.
+
+    Example usage:
+        sigma_interp = smooth(energies, sigma)
+        sigma0 = sigma_interp(0.).real
+
+    """
+    #
+    if oversample != 1:
+        x, A = finer(x, A, oversample)
+    x_fft = np.fft.fftfreq(len(x), d=x[1] - x[0])
+    A_fft = np.fft.fft(A, axis=0)
+    cutoff = x_fft.max() / cutfreq
+    A_fft[np.abs(x_fft) > cutoff] = 0
+    A = np.fft.ifft(A_fft, axis=0).astype(A.dtype)
+    if oversample != 1:
+        x, A = finer(x, A, 1 / oversample)
+    return A
