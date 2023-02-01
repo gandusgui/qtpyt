@@ -1,9 +1,11 @@
 import functools
 
 import numpy as np
+from scipy.linalg import lu_factor, lu_solve
+
 from qtpyt.base.greenfunction import BaseGreenFunction
 from qtpyt.base.selfenergy import BaseSelfEnergy
-from scipy.linalg import lu_factor, lu_solve
+from qtpyt.screening.tools import fermidistribution
 
 
 class SanchoRubio(BaseGreenFunction):
@@ -14,9 +16,17 @@ class SanchoRubio(BaseGreenFunction):
 
     conv = 1e-8  # Convergence criteria for surface Green function
 
-    def __init__(self, hs_ii, hs_ij, eta=1e-5) -> None:
+    def __init__(self, hs_ii, hs_ij, eta=1e-5, mu=0.0, kt=0.0, bias=0.0) -> None:
         self.h_ij, self.s_ij = hs_ij  # Coupling to next cell.
-        super().__init__(hs_ii[0], hs_ii[1], eta, 0.0, 0.0)
+        super().__init__(hs_ii[0], hs_ii[1], eta=eta, mu=mu, kt=kt)
+        self.bias = bias
+
+    def z(self, energy):
+        return energy - self.bias + 1.0j * self.eta
+
+    def fermi(self, energy):
+        """The fermi distribution"""
+        return fermidistribution(energy - self.mu + self.bias, self.kt)
 
     def get_Ginv(self, energy):
         """The inverse of the retarded surface Green function"""
@@ -54,7 +64,18 @@ class LeadSelfEnergy(BaseSelfEnergy):
 
     ids = ["left", "right"]
 
-    def __init__(self, hs_ii, hs_ij, hs_im=None, nbf_m=None, id="left", eta=1e-5):
+    def __init__(
+        self,
+        hs_ii,
+        hs_ij,
+        hs_im=None,
+        nbf_m=None,
+        id="left",
+        eta=1e-5,
+        mu=0.0,
+        kt=0.0,
+        bias=0.0,
+    ):
 
         assert id in self.ids, f"Invalid id. Choose between {self.ids}"
 
@@ -69,7 +90,7 @@ class LeadSelfEnergy(BaseSelfEnergy):
         if hs_im is None:
             hs_im = hs_ij
 
-        gf = SanchoRubio(hs_ii, hs_ij, eta)
+        gf = SanchoRubio(hs_ii, hs_ij, eta=eta, mu=mu, kt=kt, bias=bias)
 
         if nbf_m is not None:
             nbf_i = gf.shape[0]
@@ -84,3 +105,18 @@ class LeadSelfEnergy(BaseSelfEnergy):
             hs_im = (h_im, s_im)
 
         super().__init__(gf, hs_im)
+
+    @property
+    def bias(self):
+        return self.gf.bias
+
+    def lesser(self, energy):
+        """The lesser self-energy."""
+        # Always at equilibrium!
+        return -self.gf.fermi(energy) * (self.retarded(energy) - self.advanced(energy))
+
+    def greater(self, energy):
+        """The greater self-energy."""
+        return (1.0 - self.gf.fermi(energy)) * (
+            self.retarded(energy) - self.advanced(energy)
+        )

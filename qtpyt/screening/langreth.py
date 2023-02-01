@@ -8,10 +8,16 @@ from qtpyt.elph.hilbert import hilbert
 from qtpyt.parallel.egrid import GridDesc
 from qtpyt.screening import fft, ifft
 from qtpyt.screening.fourier import fourier_integral, get_fourier_data
-from qtpyt.screening.tools import (finer, get_extended_energies,
-                                   get_interp_indices, increase2pow2,
-                                   lesser_from_retarded, linear_interp, roll,
-                                   smooth)
+from qtpyt.screening.tools import (
+    finer,
+    get_extended_energies,
+    get_interp_indices,
+    increase2pow2,
+    lesser_from_retarded,
+    linear_interp,
+    roll,
+    smooth,
+)
 
 
 def get_retarded_from_lesser_and_greater(
@@ -194,7 +200,7 @@ class LangrethPair(GridDesc):
 
     @assert_domain("t")
     @change_domain("e")
-    def convert_lesser(self, zero_index=None):
+    def convert_less_and_great_to_ret(self, zero_index=None, override="l"):
         """Convert lessert to retarded."""
         # r(e), g(e) << l(t), g(t)
         # r(t) = theta(t) [ <(t) - >(t) ]
@@ -202,7 +208,6 @@ class LangrethPair(GridDesc):
             zero_index = self.zero_index
         l = self.collect_energies(self.arrays["l"])
         g = self.collect_energies(self.arrays["g"])
-
         ####  -1-  ####
         # l = ifft(l, axis=0)
         # g = ifft(g, axis=0)
@@ -213,15 +218,21 @@ class LangrethPair(GridDesc):
         ####  -2-  ####
         l = roll(ifft(l, axis=0), zero_index)
         g = roll(ifft(g, axis=0), zero_index)
+        if override == "l":
+            r = l
+            x = g
+            keep = "g"
+        else:
+            r = g
+            x = l
+            keep = "l"
         get_retarded_from_lesser_and_greater(
-            l, g, self.global_energies, l, oversample=self.oversample
+            l, g, self.global_energies, r, oversample=self.oversample
         )
-        r = l
         ###############
-
-        self.arrays["r"] = self.arrays.pop("l")
+        self.arrays["r"] = self.arrays.pop(override)
         self.collect_orbitals(r, self.arrays["r"])
-        self.collect_orbitals(g, self.arrays["g"])
+        self.collect_orbitals(x, self.arrays[keep])
 
     def __lshift__(self, other):
         old_k = tuple(self.arrays.keys())

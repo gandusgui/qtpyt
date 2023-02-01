@@ -4,6 +4,7 @@ from math import pi, sqrt
 import numpy as np
 
 from qtpyt import xp
+from qtpyt.base.selfenergy import DataSelfEnergy
 from qtpyt.parallel.egrid import GridDesc
 from qtpyt.parallel.tools import comm_sum
 from qtpyt.projector import BaseProjector, ProjectedGreenFunction
@@ -11,7 +12,7 @@ from qtpyt.screening.distgf import DistGreenFunction
 from qtpyt.screening.iterate_product import iterate_product
 from qtpyt.screening.langreth import LangrethPair, assert_domain, change_domain
 from qtpyt.screening.products import exchange_product, polarization_product
-from qtpyt.screening.tools import roll, rotate
+from qtpyt.screening.tools import lesser_from_retarded, roll, rotate
 
 
 class Chi(LangrethPair):
@@ -108,7 +109,7 @@ class Chi(LangrethPair):
         # )  # P<(t), P>(t)
 
         self.domain = "t"
-        self.convert_lesser(-self.zero_index)  #  Pr(e), P>(e)
+        self.convert_less_and_great_to_ret(-self.zero_index)  #  Pr(e), P>(e)
 
     def update_polarization(self):
         """Update retarded and greater components."""
@@ -183,7 +184,7 @@ class WRPA(Chi):
         self.solve_screening()  # Wr(e), W>(e)
 
 
-class GW(WRPA):
+class GW(LangrethPair):
     """GW selfenergy.
     
     This class computes the GW selfenergy within the RPA
@@ -213,299 +214,19 @@ class GW(WRPA):
             mized pair orbitlas. (#q < #p).
     """
 
-    def __init__(self, gf: DistGreenFunction, V_qq, U_pq, oversample=10) -> None:
-        # super().__init__(DistGreenFunction(gf, energies), V_qq, U_pq)
-        super().__init__(gf, V_qq, U_pq, oversample=oversample)
-
-    @assert_domain("t")
-    def solve_correlation(self):
-
-        if self.gf.domain == "e":
-            self.gf.convert_domain()
-        Gl = self.gf.arrays["l"]
-        Gg = self.gf.arrays["g"]
-        Wl = self.arrays["l"]
-        Wg = self.arrays["g"]
-
-        # Prefactor: j. from definition, and de / 2 pi for fft
-        pre = 1.0j * self.de / (2 * np.pi)
-
-        work1 = self.get_work_array()
-        work2 = self.get_work_array()
-
-        for t in range(Gl.shape[0]):
-            for G, W in [[Gl[t], Wl[t]], [Gg[t], Wg[t]]]:
-                exchange_product(
-                    G,
-                    W,
-                    pre=pre,
-                    out=G,  # OK to overwrite
-                    rot=self.U_pq,
-                    # rotd=self.U_qp,
-                    work1=work1,
-                    work2=work2,
-                )
-
-        self.gf.convert_lesser(self.zero_index)  # domain << energy
-        self.gf.domain = None
-
-    def update_correlation(self):
-        # update lesser greater green's
-
-        self.update_screening()  # Wr(e), W>(e)
-        # The following two are transformations
-        # needed to bring W into the desired domain
-        # and representation.
-        self.convert_retarded()  # W<(e), W>(e)
-        self.convert_domain()  # W<(t), W>(t)
-        self.solve_correlation()  # GWr(e), GW>(e)
-
-    def retarded(self, energy):
-        """The retarded GW self-energy.
-        
-        NOTE : Here we take the lesser array since the green's
-        function update method will change the key.
-        This is not the case for the constrained GW since we first
-        update the parent green's function.
-        """
-        return self.gf.arrays["r"][np.searchsorted(self.energies, energy)]
-
-
-class Constrained:
-    """Base class for constrained calculations.
-    
-    Args:
-        gf : qtpyt:DistGreenFunction
-            distributed green's function object.
-        indices : 1D array
-            indices of constrained subspace.
-        U_pq : 2D array (optional)
-            see Chi
-    """
-
-    def __init__(self, gf: DistGreenFunction, U_pq=None) -> None:
-        assert isinstance(
-            gf.gf0.projector, BaseProjector
-        ), "Invalid parent green's function for constrained region."
-        self.gfc = gf
-        idx = self.indices
-        self.ix = np.ix_(idx, idx)
-        self.ix4 = np.ix_(idx, idx, idx, idx)
-
-        if U_pq is None:
-            U_cq = None
-
-        else:
-            U_cq = self.cut_rotation(U_pq, idx)
-
-        self.U_cq = U_cq
-
-    @property
-    def indices(self):
-        return self.gfc.gf0.projector.indices
-
-    @staticmethod
-    def cut_rotation(U_pq, indices):
-        """Cut pairorbital rotation matrix."""
-        no2, nq = U_pq.shape
-        no = int(sqrt(no2))
-        assert no ** 2 == no2, "# p is not square of orbitals."
-        U_cq = np.ascontiguousarray(
-            U_pq.reshape(no, no, nq)[np.ix_(indices, indices)].reshape(
-                len(indices) ** 2, nq
-            )
-        )
-        return U_cq
-
-    def get_cwork_array(self):
-        if self.U_cq is None:
-            return None
-        else:
-            return xp.empty_like(self.U_cq)
-
-
-class cGW(Constrained, GW):
-    """Constrained GW calculation.
-    
-    The GW selfenergy is calculated only for a subspace of
-    the WRPA region where the screening is computed.
-    """
-
-    def __init__(self, gf: DistGreenFunction, V_qq, U_pq, oversample=10) -> None:
-        # super().__init__(DistGreenFunction(gf, energies), V_qq, U_pq)
-        Constrained.__init__(self, gf, U_pq)
-        GW.__init__(self, gf.parent, V_qq, U_pq, oversample=oversample)
-
-    @assert_domain("t")
-    def solve_correlation(self):
-
-        if self.gf.domain == "e":
-            self.gf.convert_domain()
-        self.gfc.update_from_parent(self.gf)
-        Gl = self.gfc.arrays["l"]
-        Gg = self.gfc.arrays["g"]
-        Wl = self.arrays["l"]
-        Wg = self.arrays["g"]
-
-        # Prefactor: j. from definition, and de / 2 pi for fft
-        pre = 1.0j * self.de / (2 * np.pi)
-
-        work1 = self.get_cwork_array()
-        work2 = self.get_cwork_array()
-
-        for t in range(Gl.shape[0]):
-            for G, W in [[Gl[t], Wl[t]], [Gg[t], Wg[t]]]:
-                exchange_product(
-                    G,
-                    W,
-                    pre=pre,
-                    out=G,  # OK to overwrite
-                    rot=self.U_cq,
-                    # rotd=self.U_qp,
-                    work1=work1,
-                    work2=work2,
-                )
-
-        self.gfc.convert_lesser(self.zero_index)  # domain << energy
-        self.gfc.domain = None
-
-    def retarded(self, energy):
-        """The retarded GW self-energy."""
-        return self.gfc.arrays["r"][np.searchsorted(self.energies, energy)]
-
-
-class cRPA(Constrained, WRPA):
-    """Constrained RPA."""
-
-    def __init__(self, gf: DistGreenFunction, V_qq, U_pq=None, oversample=10) -> None:
-        # super().__init__(DistGreenFunction(gf, energies), V_qq, U_pq)
-        Constrained.__init__(self, gf, U_pq)
-        WRPA.__init__(self, gf.parent, V_qq, U_pq, oversample=oversample)
-        self.chi = Chi(self.gfc, oversample=oversample)
-
-        self.work = self.get_cwork_array()
-        self.rotate = self._cut if self.work is None else self._rot
-
-    def _cut(self, W, out):
-        out[:] = W.reshape(4 * (self.gf.no,))[self.ix4].reshape(2 * (len(self.chi.no),))
-        return out
-
-    def _rot(self, W, out):
-        return self.U_cq.dot(W, out=self.work).dot(self.U_cq.T, out=out)
-
-    @property
-    def W(self):
-        return self.chi.arrays["g"]
-
-    @property
-    def U(self):
-        return self.chi.arrays["r"]
-
-    @assert_domain("e")
-    def solve_unscreening(self):
-        #       r      r       r  r  ^-1
-        #      U    = W [ I + P  W ]
-        Pr = self.chi.arrays["r"]
-        Pg = self.chi.arrays["g"]
-        Wr = self.arrays["r"]
-
-        I = np.eye(self.chi.no)
-
-        for e in range(self.energies.size):
-            cWr = self.rotate(Wr[e], out=Pg[e])
-            cWr.dot(np.linalg.inv(I + Pr[e].dot(cWr)), out=Pr[e])
-
-    def update_unscreening(self):
-        self.update_screening()  # Wr(e), W>(e)
-        self.gfc.update_from_parent(self.gf)  # g<(t), g>(t)
-        self.chi.update_polarization()  # Pr(e), P>(e)
-        self.solve_unscreening()
-
-
-class cRPA2(Constrained, WRPA):
-    """Constrained RPA."""
-
-    def __init__(self, gf: DistGreenFunction, V_qq, U_pq=None, oversample=10) -> None:
-        # super().__init__(DistGreenFunction(gf, energies), V_qq, U_pq)
-        Constrained.__init__(self, gf, U_pq)
-        WRPA.__init__(self, gf.parent, V_qq, U_pq, oversample=oversample)
-        self.chi = Chi(self.gfc, oversample=oversample)
-
-        self.rotate = self._cut if U_pq is None else self._rot
-
-    def _cut(self, W, out):
-        out[:] = W.reshape(4 * (self.gf.no,))[self.ix4].reshape(2 * (len(self.chi.no),))
-        return out
-
-    def _rot(self, W, out):
-        return self.U_cq.dot(W, out=self.work).dot(self.U_cq.T, out=out)
-
-    @property
-    def W(self):
-        raise NotImplementedError("Not available with this method.")
-
-    @property
-    def U(self):
-        return self.chi.arrays["r"]
-
-    @assert_domain("e")
-    def screen_polarization(self):
-        """Set to zero the polarization of the constrained region."""
-        Pr = self.arrays["r"]
-        no = self.gf.no
-        rotate = lambda X, U: X
-        if self.U_pq is not None:
-            rotate = lambda X, U: U.dot(X).dot(U.T)
-        for e in range(self.energies.size):
-            P_pp = rotate(Pr[e], self.U_pq)
-            P_pp = P_pp.reshape((no,) * 4)
-            P_pp[self.ix4] = 0.0
-            P_pp = P_pp.reshape((no ** 2,) * 2)
-            Pr[e, ...] = rotate(P_pp, self.U_pq.T)
-
-    @assert_domain("e")
-    def solve_unscreening(self):
-        W = self.arrays["r"]
-        self.chi.arrays["r"] = self.chi.arrays.pop("l")
-        U = self.chi.arrays["r"]
-        for e in range(self.energies.size):
-            self.rotate(W[e], out=U[e])
-
-    def update_unscreening2(self):
-        self.update_polarization()  # Pr(e), P>(e)
-        self.screen_polarization()
-        self.solve_screening()  # Wr(e), W>(e)
-        self.solve_unscreening()  # Ur(e)
-
-
-class cRPA0(Constrained):
-    """Static constrained RPA."""
-
-    def __init__(self, gf: DistGreenFunction, V_qq, U_pq=None) -> None:
-        # super().__init__(DistGreenFunction(gf, energies), V_qq, U_pq)
-        super().__init__(gf, U_pq)
+    def __init__(
+        self, wrpa: WRPA, gf: DistGreenFunction = None, U_pq=None, oversample=10
+    ) -> None:
+        self.wrpa = wrpa
+        if gf is None:
+            gf = self.wrpa.gf
+        if U_pq is None and hasattr(self.wrpa, "U_pq"):  # W is in pair-orbital basis.
+            U_pq = self.wrpa.U_pq
+        self.gf = gf
         self.U_pq = U_pq
-        self.V_qq = V_qq
-        nq = self.gf.parent.no ** 2 if U_pq is None else U_pq.shape[1]
-        nc = self.gfc.no
-        self.gdc = GridDesc(gf.global_energies, nc ** 2)
-        self.gdq = GridDesc(gf.global_energies, nq)
-
-        if self.U_cq is None:
-            project_screening = lambda W, out=None: W.reshape(4 * (self.gf.no,))[
-                self.ix4
-            ].reshape(2 * (len(self.gdc.no),))
-        else:
-            self.work = self.get_cwork_array()
-            project_screening = lambda W, out=None: self.U_cq.dot(W, out=self.work).dot(
-                self.U_cq.T, out=out
-            )
-
-        self.project_screening = project_screening
-
-    @property
-    def gf(self):
-        return self.gfc.parent
+        super().__init__(
+            gf.global_energies, gf.no, dtype=complex, oversample=oversample
+        )
 
     def get_work_array(self):
         """Get temp work arrays used in product."""
@@ -513,69 +234,293 @@ class cRPA0(Constrained):
             return None
         return xp.empty_like(self.U_pq)
 
-    def get_eintegral_weights(self):
-        return self.gdc.get_eintegral_weights() * -1.0j / np.pi
+    def solve_correlation(self):
 
-    def solve_polarization(self):
-        """Solve polarization."""
-        assert self.gf.domain == "e"
-        Gr = self.gf.arrays["r"]
-        weights = self.get_eintegral_weights()
-        Pr, Pr_e = np.zeros((2, self.gdq.no, self.gdq.no), complex)
+        if self.gf.domain == "e":
+            self.gf.convert_domain()
+        Gl = self.gf.arrays["l"]
+        Gg = self.gf.arrays["g"]
+        Wl = self.wrpa.arrays["l"]
+        Wg = self.wrpa.arrays["g"]
+
+        self.arrays["g"] = (
+            self.arrays["g"] if "g" in self.arrays.keys() else self.arrays.pop("r")
+        )
+        GWl = self.arrays["l"]
+        GWg = self.arrays["g"]
+
+        # Prefactor: j. from definition, and de / 2 pi for fft
+        pre = 1.0j * self.de / (2 * np.pi)
 
         work1 = self.get_work_array()
         work2 = self.get_work_array()
 
-        for e in range(self.gf.energies.size):
-            polarization_product(
-                Gr[e],
-                Gr[e].T,
-                out=Pr_e,
-                pre=weights[e],
-                work1=work1,
-                work2=work2,
-                rot=self.U_pq,
-            )
-            Pr += Pr_e
+        for t in range(Gl.shape[0]):
+            for G, W, GW in [[Gl[t], Wl[t], GWl[t]], [Gg[t], Wg[t], GWg[t]]]:
+                exchange_product(
+                    G,
+                    W,
+                    pre=pre,
+                    out=GW,
+                    rot=self.U_pq,
+                    # rotd=self.U_qp,
+                    work1=work1,
+                    work2=work2,
+                )
 
-        self.Pr = comm_sum(Pr)
-        self.Pr += self.Pr.conj()
+        self.domain = "t"
+        self.convert_less_and_great_to_ret(
+            self.zero_index, override="g"
+        )  # domain << energy
 
-    def solve_cpolarization(self):
-        """Compute constraint polarization."""
-        assert self.gfc.domain == "e"
-        gr = self.gfc.arrays["r"]
-        weights = self.get_eintegral_weights()
-        pr, pr_e = np.zeros((2, self.gdc.no, self.gdc.no), complex)
+    def update_correlation(self):
+        # update lesser greater green's
 
-        for e in range(self.gfc.energies.size):
-            polarization_product(gr[e], gr[e].T, out=pr_e, pre=weights[e])
-            pr += pr_e
+        self.wrpa.update_screening()  # Wr(e), W>(e)
+        self.wrpa.convert_retarded()  # W<(e), W>(e)
+        self.wrpa.convert_domain()  # W<(t), W>(t)
+        self.solve_correlation()  # GWr(e), GW<(e)
 
-        self.pr = comm_sum(pr)
-        self.pr += self.pr.conj()
+    def retarded(self, energy):
+        """The retarded GW self-energy."""
+        return self.arrays["r"][np.searchsorted(self.energies, energy)]
 
-    def solve_screening(self):
-        """Compute screened interaction.
-                      -1       
-        W = [ 1 - VP ]   V
-        """
-        I = np.eye(self.gdq.no)
-        Wq = np.linalg.solve(I - self.V_qq.dot(self.Pr), self.V_qq)
-        self.Wr = self.project_screening(Wq)
+    def lesser(self, energy):
+        """The retarded GW self-energy."""
+        return self.arrays["l"][np.searchsorted(self.energies, energy)]
 
-    def solve_unscreening(self):
-        """Unscreen with constrained channels.
-                        -1      
-        U = W [ 1 + PW ]
-        """
-        I = np.eye(self.gdc.no)
-        self.Ur = self.Wr.dot(np.linalg.inv(I + self.pr.dot(self.Wr)))
 
-    def calculate(self):
-        self.gfc.update(lg=False)
-        self.solve_cpolarization()
-        self.solve_polarization()
-        self.solve_screening()
-        self.solve_unscreening()
+# Constrained methods
 
+
+def cut_rotation(U_pq, indices):
+    """Cut pairorbital rotation matrix."""
+    no2, nq = U_pq.shape
+    no = int(sqrt(no2))
+    assert no ** 2 == no2, "# p is not square of orbitals."
+    U_cq = np.ascontiguousarray(
+        U_pq.reshape(no, no, nq)[np.ix_(indices, indices)].reshape(
+            len(indices) ** 2, nq
+        )
+    )
+    return U_cq
+
+
+# class Constrained:
+#     """Base class for constrained calculations.
+
+#     Args:
+#         gf : qtpyt:DistGreenFunction
+#             distributed green's function object.
+#         indices : 1D array
+#             indices of constrained subspace.
+#         U_pq : 2D array (optional)
+#             see Chi
+#     """
+
+#     def __init__(self, gf: DistGreenFunction, U_pq=None) -> None:
+#         assert isinstance(
+#             gf.gf0.projector, BaseProjector
+#         ), "Invalid parent green's function for constrained region."
+#         self.gfc = gf
+#         idx = self.indices
+#         self.ix = np.ix_(idx, idx)
+#         self.ix4 = np.ix_(idx, idx, idx, idx)
+
+#         if U_pq is None:
+#             U_cq = None
+
+#         else:
+#             U_cq = self.cut_rotation(U_pq, idx)
+
+#         self.U_cq = U_cq
+
+#     @property
+#     def indices(self):
+#         return self.gfc.gf0.projector.indices
+
+#     @staticmethod
+#     def cut_rotation(U_pq, indices):
+#         """Cut pairorbital rotation matrix."""
+#         no2, nq = U_pq.shape
+#         no = int(sqrt(no2))
+#         assert no ** 2 == no2, "# p is not square of orbitals."
+#         U_cq = np.ascontiguousarray(
+#             U_pq.reshape(no, no, nq)[np.ix_(indices, indices)].reshape(
+#                 len(indices) ** 2, nq
+#             )
+#         )
+#         return U_cq
+
+#     def get_cwork_array(self):
+#         if self.U_cq is None:
+#             return None
+#         else:
+#             return xp.empty_like(self.U_cq)
+
+
+# class cGW(Constrained, GW):
+#     """Constrained GW calculation.
+
+#     The GW selfenergy is calculated only for a subspace of
+#     the WRPA region where the screening is computed.
+#     """
+
+#     def __init__(self, gf: DistGreenFunction, V_qq, U_pq, oversample=10) -> None:
+#         # super().__init__(DistGreenFunction(gf, energies), V_qq, U_pq)
+#         Constrained.__init__(self, gf, U_pq)
+#         GW.__init__(self, gf.parent, V_qq, U_pq, oversample=oversample)
+
+#     def __getattr__(self, attr):
+#         """When """
+#         if attr in ['gf','U_pq','get_work_array']:
+#             return getattr(self.wrpa, attr)
+#         raise AttributeError
+
+#     @assert_domain("t")
+#     def solve_correlation(self):
+
+#         if self.gf.domain == "e":
+#             self.gf.convert_domain()
+#         self.gfc.update_from_parent(self.gf)
+#         Gl = self.gfc.arrays["l"]
+#         Gg = self.gfc.arrays["g"]
+#         Wl = self.arrays["l"]
+#         Wg = self.arrays["g"]
+
+#         # Prefactor: j. from definition, and de / 2 pi for fft
+#         pre = 1.0j * self.de / (2 * np.pi)
+
+#         work1 = self.get_cwork_array()
+#         work2 = self.get_cwork_array()
+
+#         for t in range(Gl.shape[0]):
+#             for G, W in [[Gl[t], Wl[t]], [Gg[t], Wg[t]]]:
+#                 exchange_product(
+#                     G,
+#                     W,
+#                     pre=pre,
+#                     out=G,  # OK to overwrite
+#                     rot=self.U_cq,
+#                     # rotd=self.U_qp,
+#                     work1=work1,
+#                     work2=work2,
+#                 )
+
+#         self.gfc.convert_less_and_great_to_ret(self.zero_index)  # domain << energy
+#         self.gfc.domain = None
+
+#     def retarded(self, energy):
+#         """The retarded GW self-energy."""
+#         return self.gfc.arrays["r"][np.searchsorted(self.energies, energy)]
+
+#     def greater(self, energy):
+#         return self.gfc.arrays["g"][np.searchsorted(self.energies, energy)]
+
+#     def lesser(self, energy):
+#         Gr = self.retarded(energy)
+#         Gg = self.retarded(energy)
+#         return lesser_from_retarded(self.retarded(energy), self.gfc.arr
+
+# class cRPA(Constrained, WRPA):
+#     """Constrained RPA."""
+
+#     def __init__(self, gf: DistGreenFunction, V_qq, U_pq=None, oversample=10) -> None:
+#         # super().__init__(DistGreenFunction(gf, energies), V_qq, U_pq)
+#         Constrained.__init__(self, gf, U_pq)
+#         WRPA.__init__(self, gf.parent, V_qq, U_pq, oversample=oversample)
+#         self.chi = Chi(self.gfc, oversample=oversample)
+
+#         self.work = self.get_cwork_array()
+#         self.rotate = self._cut if self.work is None else self._rot
+
+#     def _cut(self, W, out):
+#         out[:] = W.reshape(4 * (self.gf.no,))[self.ix4].reshape(2 * (len(self.chi.no),))
+#         return out
+
+#     def _rot(self, W, out):
+#         return self.U_cq.dot(W, out=self.work).dot(self.U_cq.T, out=out)
+
+#     @property
+#     def W(self):
+#         return self.chi.arrays["g"]
+
+#     @property
+#     def U(self):
+#         return self.chi.arrays["r"]
+
+#     @assert_domain("e")
+#     def solve_unscreening(self):
+#         #       r      r       r  r  ^-1
+#         #      U    = W [ I + P  W ]
+#         Pr = self.chi.arrays["r"]
+#         Pg = self.chi.arrays["g"]
+#         Wr = self.arrays["r"]
+
+#         I = np.eye(self.chi.no)
+
+#         for e in range(self.energies.size):
+#             cWr = self.rotate(Wr[e], out=Pg[e])
+#             cWr.dot(np.linalg.inv(I + Pr[e].dot(cWr)), out=Pr[e])
+
+#     def update_unscreening(self):
+#         self.update_screening()  # Wr(e), W>(e)
+#         self.gfc.update_from_parent(self.gf)  # g<(t), g>(t)
+#         self.chi.update_polarization()  # Pr(e), P>(e)
+#         self.solve_unscreening()
+
+
+# class cRPA2(Constrained, WRPA):
+#     """Constrained RPA."""
+
+#     def __init__(self, gf: DistGreenFunction, V_qq, U_pq=None, oversample=10) -> None:
+#         # super().__init__(DistGreenFunction(gf, energies), V_qq, U_pq)
+#         Constrained.__init__(self, gf, U_pq)
+#         WRPA.__init__(self, gf.parent, V_qq, U_pq, oversample=oversample)
+#         self.chi = Chi(self.gfc, oversample=oversample)
+
+#         self.rotate = self._cut if U_pq is None else self._rot
+
+#     def _cut(self, W, out):
+#         out[:] = W.reshape(4 * (self.gf.no,))[self.ix4].reshape(2 * (len(self.chi.no),))
+#         return out
+
+#     def _rot(self, W, out):
+#         return self.U_cq.dot(W, out=self.work).dot(self.U_cq.T, out=out)
+
+#     @property
+#     def W(self):
+#         raise NotImplementedError("Not available with this method.")
+
+#     @property
+#     def U(self):
+#         return self.chi.arrays["r"]
+
+#     @assert_domain("e")
+#     def screen_polarization(self):
+#         """Set to zero the polarization of the constrained region."""
+#         Pr = self.arrays["r"]
+#         no = self.gf.no
+#         rotate = lambda X, U: X
+#         if self.U_pq is not None:
+#             rotate = lambda X, U: U.dot(X).dot(U.T)
+#         for e in range(self.energies.size):
+#             P_pp = rotate(Pr[e], self.U_pq)
+#             P_pp = P_pp.reshape((no,) * 4)
+#             P_pp[self.ix4] = 0.0
+#             P_pp = P_pp.reshape((no ** 2,) * 2)
+#             Pr[e, ...] = rotate(P_pp, self.U_pq.T)
+
+#     @assert_domain("e")
+#     def solve_unscreening(self):
+#         W = self.arrays["r"]
+#         self.chi.arrays["r"] = self.chi.arrays.pop("l")
+#         U = self.chi.arrays["r"]
+#         for e in range(self.energies.size):
+#             self.rotate(W[e], out=U[e])
+
+#     def update_unscreening2(self):
+#         self.update_polarization()  # Pr(e), P>(e)
+#         self.screen_polarization()
+#         self.solve_screening()  # Wr(e), W>(e)
+#         self.solve_unscreening()  # Ur(e)

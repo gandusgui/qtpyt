@@ -70,15 +70,12 @@ class DistGreenFunction(LangrethPair):
             if callback is None:
                 callback = lambda e, energy: None  # Identity
 
-            def get(key):
-                try:
-                    self.arrays[key]
-                except KeyError:
-                    self.arrays[key] = self.arrays.pop("g")
-                return self.arrays[key]
+            self.arrays["r"] = (
+                self.arrays["r"] if "r" in self.arrays.keys() else self.arrays.pop("g")
+            )
+            Gr = self.arrays["r"]
+            Gl = self.arrays["l"]
 
-            Gr = get("r")
-            Gl = get("l")
             for e, energy in enumerate(self.energies):
                 callback(e, energy)
                 Gr[e] = asnumpy(self.gf0.retarded(energy))

@@ -2,20 +2,10 @@ from types import MethodType
 from typing import Any, Callable, Union
 
 import numpy as np
+
 from qtpyt import xp
-from qtpyt.base._kernels import _mul, _mulc
+from qtpyt.base._kernels import dagger
 from qtpyt.base.greenfunction import BaseGreenFunction, GreenFunction
-
-# def _gf_property(name):
-#     @property
-#     def pro(self):
-#         return getattr(self.gf, name)
-
-#     @pro.setter
-#     def pro(self, val):
-#         setattr(self.gf, name, val)
-
-#     return pro
 
 
 class BaseSelfEnergy:
@@ -26,7 +16,6 @@ class BaseSelfEnergy:
         self.h_ij, self.s_ij = hs_ij
         self.Sigma = np.empty(self.shape, complex)
         self.energy = None
-        self.bias = 0.0
 
     @property
     def shape(self):
@@ -49,7 +38,7 @@ class BaseSelfEnergy:
         self.gf.eta = eta
 
     def z(self, energy):
-        return energy - self.bias + 1.0j * self.eta
+        return self.gf.z(energy)
 
     def retarded(self, energy):
         """The retarded self-energy."""
@@ -61,6 +50,9 @@ class BaseSelfEnergy:
             tau_ji.dot(G).dot(tau_ij, out=self.Sigma)
 
         return self.Sigma
+
+    def advanced(self, energy):
+        return dagger(self.retarded(energy))
 
     def get_lambda(self, energy):
         """Return the lambda (aka Gamma) defined by i(S-S^d)."""
@@ -114,6 +106,7 @@ class DataSelfEnergy(ConstSelfEnergy):
 
     def __init__(self, energies, Sigma) -> None:
         self.energies = energies
+        self.energy = None
         super().__init__(Sigma=Sigma)
 
     def retarded(self, energy):
@@ -142,7 +135,14 @@ class StackSelfEnergy(ConstSelfEnergy):
         self.Sigma[:] = 0.0
         for selfenergy in self.selfenergies:
             self.Sigma += selfenergy.retarded(energy)
-        return super().retarded(energy)
+        return self.Sigma
+
+    def lesser(self, energy):
+        self.Sigma[:] = 0.0
+        for selfenergy in self.selfenergies:
+            if hasattr(selfenergy, "lesser"):
+                self.Sigma += selfenergy.lesser(energy)
+        return self.Sigma
 
 
 def ZeroFilter(selfenergy: Union[BaseSelfEnergy, ConstSelfEnergy], func: Callable):

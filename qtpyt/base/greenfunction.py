@@ -3,7 +3,7 @@ from typing import Any, List
 
 from qtpyt import xp
 from qtpyt.base._kernels import dagger, dotdiag, dottrace, get_lambda
-from qtpyt.screening.tools import fermidistribution
+from qtpyt.screening.tools import fermidistribution, rotate
 
 
 class BaseGreenFunction:
@@ -72,10 +72,19 @@ class GreenFunction(BaseGreenFunction):
         S = xp.asarray(S)
 
         self.selfenergies = selfenergies
-        self.idxleads = idxleads
-        self.gammas = [None] * len(idxleads)
+        self.idxleads = sorted(idxleads)
+        self.gammas = None
 
         super().__init__(H, S, eta, mu, kt)
+
+    @property
+    def equilibrium(self):
+        """Equilibrium Green's function."""
+        biases = []
+        for i in self.idxleads:
+            selfenergy = self.selfenergies[i][1]
+            biases.append(selfenergy.bias)
+        return xp.all([abs(bias - biases[0]) < 1e-7 for bias in biases])
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "eta":
@@ -85,12 +94,13 @@ class GreenFunction(BaseGreenFunction):
 
     def get_Ginv(self, energy):
         Ginv = self.z(energy) * self.S - self.H
+        self.gammas = []
         # Add selfenergies
         for i, (indices, selfenergy) in enumerate(self.selfenergies):
             sigma = xp.asarray(selfenergy.retarded(energy))
             Ginv[indices] -= sigma
             if i in self.idxleads:
-                self.gammas[i] = get_lambda(sigma)
+                self.gammas.append(get_lambda(sigma))
 
         return Ginv
 
@@ -102,11 +112,61 @@ class GreenFunction(BaseGreenFunction):
             self.Gr = xp.linalg.inv(Ginv)
         return self.Gr
 
+    def lesser(self, energy):
+        """The lesser green's function."""
+
+        # -f(e-mu) (Gr - Ga)
+        if self.equilibrium:
+            return super().lesser(energy)
+
+        # Gr S< Ga
+        self.Sl = xp.zeros(self.shape, complex)
+        for i, (indices, selfenergy) in enumerate(self.selfenergies):
+            if hasattr(selfenergy, "lesser"):
+                self.Sl[indices] += selfenergy.lesser(energy)
+        return self.retarded(energy).dot(self.Sl).dot(self.advanced(energy))
+
+    def greater(self, energy):
+
+        # (1-f(e-mu)) (Gr - Ga)
+        if self.equilibrium:
+            return super().greater(energy)
+
+        # < = > - r + a
+        # > = < + r - a
+        return self.lesser(energy) + self.retarded(energy) - self.advanced(energy)
+
     def get_transmission(self, energy):
         """Get the transmission coeffiecient."""
+        # if self.equilibrium:
+        # Gr = self.retarded(energy)  # updates gammas
         a_mm = self.retarded(energy).dot(self.gammas[0])
         b_mm = self.advanced(energy).dot(self.gammas[1])
         return dottrace(a_mm, b_mm).real
+
+        # delta = 0.0
+        # for se in selist:
+        #     if se.Correlated():
+        #         ret = se.GetRetarded(e)
+        #         delta += 1.j * (ret - ret.T.conj())
+        # delta[:] = np.linalg.solve(lambdal + lambdar +
+        #                             2 * self.GetInfinitesimal() *
+        #                             self.GetIdentityRepresentation(),
+        #                             delta)
+        # delta.flat[::len(delta) + 1] += 1.0
+        # T_e[e] = dots(
+        #     lambdal, Gr, lambdar, delta, Gr.T.conj()).trace().real
+
+    def get_current_density(self, energy):
+        """The current density."""
+        selfenergy = self.selfenergies[self.idxleads[0]][1]
+        fermi = selfenergy.gf.fermi(energy)
+        Gl = self.lesser(energy)  # updates gammas
+        Gg = self.greater(energy)
+        Sl = 1.0j * self.gammas[0] * fermi
+        Sg = 1.0j * self.gammas[0] * (fermi - 1)
+        # return sum(dotdiag(Sl, Gg) - dotdiag(Sg, Gl)).real
+        return (dottrace(Sl, Gg) - dottrace(Sg, Gl)).real
 
     def get_spectrals(self, energy):
         """Get spectral functions."""
