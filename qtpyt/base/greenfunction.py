@@ -2,7 +2,7 @@ from math import pi
 from typing import Any, List
 
 from qtpyt import xp
-from qtpyt.base._kernels import dagger, dotdiag, dottrace, get_lambda
+from qtpyt.base._kernels import dagger, dotdiag, dots, dottrace, get_lambda
 from qtpyt.screening.tools import fermidistribution, rotate
 
 
@@ -138,26 +138,34 @@ class GreenFunction(BaseGreenFunction):
 
     def get_transmission(self, energy):
         """Get the transmission coeffiecient."""
-        # if self.equilibrium:
-        # Gr = self.retarded(energy)  # updates gammas
-        a_mm = self.retarded(energy).dot(self.gammas[0])
-        b_mm = self.advanced(energy).dot(self.gammas[1])
-        return dottrace(a_mm, b_mm).real
+        if len(self.idxleads) == len(self.selfenergies):
+            a_mm = self.retarded(energy).dot(self.gammas[0])  # updates gammas
+            b_mm = self.advanced(energy).dot(self.gammas[1])
+            return dottrace(a_mm, b_mm).real
 
-        # delta = 0.0
-        # for se in selist:
-        #     if se.Correlated():
-        #         ret = se.GetRetarded(e)
-        #         delta += 1.j * (ret - ret.T.conj())
-        # delta[:] = np.linalg.solve(lambdal + lambdar +
-        #                             2 * self.GetInfinitesimal() *
-        #                             self.GetIdentityRepresentation(),
-        #                             delta)
-        # delta.flat[::len(delta) + 1] += 1.0
-        # T_e[e] = dots(
-        #     lambdal, Gr, lambdar, delta, Gr.T.conj()).trace().real
+        # Ferretti : https://journals.aps.org/prb/pdf/10.1103/PhysRevB.72.125114
+        delta = xp.zeros(self.shape, complex)
+        for i, (indices, selfenergy) in enumerate(self.selfenergies):
+            if i not in self.idxleads:
+                sigma = selfenergy.retarded(energy)
+                delta[indices] += get_lambda(sigma)  # 1.j * (sigma - sigma.T.conj())
+        delta[:] = xp.linalg.solve(
+            self.gammas[0] + self.gammas[1] + 2 * self.eta * self.S, delta
+        )
+        delta.flat[:: len(delta) + 1] += 1.0
+        return (
+            dots(
+                self.gammas[0],
+                self.retarded(energy),
+                self.gammas[1],
+                delta,
+                self.advanced(energy),
+            )
+            .trace()
+            .real
+        )
 
-    def get_current_density(self, energy):
+    def get_current(self, energy):
         """The current density."""
         selfenergy = self.selfenergies[self.idxleads[0]][1]
         fermi = selfenergy.gf.fermi(energy)
@@ -166,7 +174,7 @@ class GreenFunction(BaseGreenFunction):
         Sl = 1.0j * self.gammas[0] * fermi
         Sg = 1.0j * self.gammas[0] * (fermi - 1)
         # return sum(dotdiag(Sl, Gg) - dotdiag(Sg, Gl)).real
-        return (dottrace(Sl, Gg) - dottrace(Sg, Gl)).real
+        return (-dottrace(Sl, Gg) + dottrace(Sg, Gl)).real
 
     def get_spectrals(self, energy):
         """Get spectral functions."""

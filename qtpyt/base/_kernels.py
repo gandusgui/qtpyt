@@ -37,3 +37,9 @@ def dottrace(x, y, res=0.0):
     for i in range(x.shape[0]):
         res += xp.sum(x[i, :] * y[:, i])
     return res
+
+def dots(*args):
+    x = args[0]
+    for M in args[1:]:
+        x = xp.dot(x, M)
+    return x    
