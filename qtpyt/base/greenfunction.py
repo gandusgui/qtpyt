@@ -136,9 +136,9 @@ class GreenFunction(BaseGreenFunction):
         # > = < + r - a
         return self.lesser(energy) + self.retarded(energy) - self.advanced(energy)
 
-    def get_transmission(self, energy):
+    def get_transmission(self, energy, ferretti=True):
         """Get the transmission coeffiecient."""
-        if len(self.idxleads) == len(self.selfenergies):
+        if (len(self.idxleads) == len(self.selfenergies)) or (~ferretti):
             a_mm = self.retarded(energy).dot(self.gammas[0])  # updates gammas
             b_mm = self.advanced(energy).dot(self.gammas[1])
             return dottrace(a_mm, b_mm).real
@@ -174,7 +174,8 @@ class GreenFunction(BaseGreenFunction):
         Sl = 1.0j * self.gammas[0] * fermi
         Sg = 1.0j * self.gammas[0] * (fermi - 1)
         # return sum(dotdiag(Sl, Gg) - dotdiag(Sg, Gl)).real
-        return (-dottrace(Sl, Gg) + dottrace(Sg, Gl)).real
+        return max((-dottrace(Sl, Gg) + dottrace(Sg, Gl)).real, 0.0)
+        # return (-dottrace(Sl, Gg) + dottrace(Sg, Gl)).real
 
     def get_spectrals(self, energy):
         """Get spectral functions."""

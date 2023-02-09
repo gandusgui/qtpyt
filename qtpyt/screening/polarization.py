@@ -237,6 +237,9 @@ class GW(LangrethPair):
     def solve_correlation(self):
 
         if self.gf.domain == "e":
+            # At this point gf has been updated.
+            # If gf is the same as wrpa.gf, then domain is already t
+            # Else, it needs to be converted.
             self.gf.convert_domain()
         Gl = self.gf.arrays["l"]
         Gg = self.gf.arrays["g"]
@@ -258,14 +261,7 @@ class GW(LangrethPair):
         for t in range(Gl.shape[0]):
             for G, W, GW in [[Gl[t], Wl[t], GWl[t]], [Gg[t], Wg[t], GWg[t]]]:
                 exchange_product(
-                    G,
-                    W,
-                    pre=pre,
-                    out=GW,
-                    rot=self.U_pq,
-                    # rotd=self.U_qp,
-                    work1=work1,
-                    work2=work2,
+                    G, W, pre=pre, out=GW, rot=self.U_pq, work1=work1, work2=work2,
                 )
 
         self.domain = "t"
@@ -304,6 +300,132 @@ def cut_rotation(U_pq, indices):
         )
     )
     return U_cq
+
+
+class cRPA(LangrethPair):
+    """Constrained RPA."""
+
+    def __init__(self, wrpa: WRPA, ic: np.ndarray) -> None:
+        self.U_qq = None  # sets to 0. polarization of `c` subspace
+        self.U_cq = None
+        if wrpa.U_pq is not None:
+            U_pq = wrpa.U_pq
+            U_qp = U_pq.T
+            U_pr = np.eye(U_pq.shape[0], dtype=U_pq.dtype)
+            #
+            self.U_qq = U_qp.dot(U_pr).dot(U_pq)
+            self.U_cq = cut_rotation(U_pq, ic)
+        super().__init__(wrpa.global_energies, len(ic)**2, dtype=complex)
+        self.wrpa = wrpa
+        self.ic = ic
+        self.ic4 = np.ix_(self.ic, self.ic, self.ic, self.ic)
+        self.arrays["r"] = self.arrays.pop("l")
+        self.arrays.pop("g")  # not required
+        # self.domain = "e"
+
+    def _screen_polarization(self, P, work=None):
+        if self.U_qq is None:
+            no = int(sqrt(self.no))
+            P = P.reshape(4 * (no,))
+            P[self.ic4] = 0.0
+        else:
+            work = P.dot(self.U_qq, out=work)
+            return self.U_qq.T.dot(work, out=P)
+            # return rotate(P, self.U_qq, work=work, overwrite_a=True)
+
+    # @assert_domain("e")
+    def screen_polarization(self):
+        """Set to zero the polarization of the constrained region."""
+        Pr = self.wrpa.arrays["r"]
+        work = (
+            None
+            if self.U_qq is None
+            else np.empty(self.U_qq.shape, dtype=self.U_qq.dtype)
+        )
+        for e in range(Pr.shape[0]):
+            self._screen_polarization(Pr[e], work=work)
+
+    def _cut_screening(self, W, work=None, out=None):
+        if self.U_cq is None:
+            no = int(sqrt(self.no))
+            W = W.reshape(4 * (no,))
+            return W[self.ic4]
+        else:
+            work = W.dot(self.U_cq.T, out=work)
+            return self.U_cq.dot(work, out=out)
+            # return rotate(W, self.U_cq, work=work, out=out)
+
+    # @assert_domain("e")
+    def solve_unscreening(self):
+        Wr = self.wrpa.arrays["r"]
+        Ur = self.arrays["r"]
+        work = (
+            None
+            if self.U_cq is None
+            else np.empty(self.U_cq.T.shape, dtype=self.U_cq.dtype)
+        )
+        for e in range(Wr.shape[0]):
+            self._cut_screening(Wr[e], work=work, out=Ur[e])
+
+    def update_unscreening(self):
+        # update lesser greater green's
+        self.wrpa.update_polarization()  # Pr(e), P>(e)
+        self.screen_polarization()  # Pr'(e) :: ' means `c` subspace is 0.
+        self.wrpa.solve_screening()  # Wr(e)
+        self.solve_unscreening()
+
+    # def __init__(self, gf: DistGreenFunction, V_qq, U_pq=None, oversample=10) -> None:
+    #     # super().__init__(DistGreenFunction(gf, energies), V_qq, U_pq)
+    #     Constrained.__init__(self, gf, U_pq)
+    #     WRPA.__init__(self, gf.parent, V_qq, U_pq, oversample=oversample)
+    #     self.chi = Chi(self.gfc, oversample=oversample)
+    #     super().__init__(energies, no, dtype, oversample)
+
+    #     self.rotate = self._cut if U_pq is None else self._rot
+
+    # def _cut(self, W, out):
+    #     out[:] = W.reshape(4 * (self.gf.no,))[self.ix4].reshape(2 * (len(self.chi.no),))
+    #     return out
+
+    # def _rot(self, W, out):
+    #     return self.U_cq.dot(W, out=self.work).dot(self.U_cq.T, out=out)
+
+    # @property
+    # def W(self):
+    #     raise NotImplementedError("Not available with this method.")
+
+    # @property
+    # def U(self):
+    #     return self.chi.arrays["r"]
+
+    # @assert_domain("e")
+    # def screen_polarization(self):
+    #     """Set to zero the polarization of the constrained region."""
+    #     Pr = self.arrays["r"]
+    #     no = self.gf.no
+    #     rotate = lambda X, U: X
+    #     if self.U_pq is not None:
+    #         rotate = lambda X, U: U.dot(X).dot(U.T)
+    #     for e in range(self.energies.size):
+    #         P_pp = rotate(Pr[e], self.U_pq)
+    #         P_pp = P_pp.reshape((no,) * 4)
+    #         P_pp[self.ix4] = 0.0
+    #         P_pp = P_pp.reshape((no ** 2,) * 2)
+    #         Pr[e, ...] = rotate(P_pp, self.U_pq.T)
+
+    # @assert_domain("e")
+    # def solve_unscreening(self):
+    #     W = self.arrays["r"]
+    #     self.chi.arrays["r"] = self.chi.arrays.pop("l")
+    #     U = self.chi.arrays["r"]
+    #     for e in range(self.energies.size):
+    #         self.rotate(W[e], out=U[e])
+
+    # def update_unscreening2(self):
+    #     self.update_polarization()  # Pr(e), P>(e)
+    #     self.screen_polarization()
+    #     self.solve_screening()  # Wr(e), W>(e)
+    #     self.solve_unscreening()  # Ur(e)
 
 
 # class Constrained:
@@ -469,58 +591,3 @@ def cut_rotation(U_pq, indices):
 #         self.chi.update_polarization()  # Pr(e), P>(e)
 #         self.solve_unscreening()
 
-
-# class cRPA2(Constrained, WRPA):
-#     """Constrained RPA."""
-
-#     def __init__(self, gf: DistGreenFunction, V_qq, U_pq=None, oversample=10) -> None:
-#         # super().__init__(DistGreenFunction(gf, energies), V_qq, U_pq)
-#         Constrained.__init__(self, gf, U_pq)
-#         WRPA.__init__(self, gf.parent, V_qq, U_pq, oversample=oversample)
-#         self.chi = Chi(self.gfc, oversample=oversample)
-
-#         self.rotate = self._cut if U_pq is None else self._rot
-
-#     def _cut(self, W, out):
-#         out[:] = W.reshape(4 * (self.gf.no,))[self.ix4].reshape(2 * (len(self.chi.no),))
-#         return out
-
-#     def _rot(self, W, out):
-#         return self.U_cq.dot(W, out=self.work).dot(self.U_cq.T, out=out)
-
-#     @property
-#     def W(self):
-#         raise NotImplementedError("Not available with this method.")
-
-#     @property
-#     def U(self):
-#         return self.chi.arrays["r"]
-
-#     @assert_domain("e")
-#     def screen_polarization(self):
-#         """Set to zero the polarization of the constrained region."""
-#         Pr = self.arrays["r"]
-#         no = self.gf.no
-#         rotate = lambda X, U: X
-#         if self.U_pq is not None:
-#             rotate = lambda X, U: U.dot(X).dot(U.T)
-#         for e in range(self.energies.size):
-#             P_pp = rotate(Pr[e], self.U_pq)
-#             P_pp = P_pp.reshape((no,) * 4)
-#             P_pp[self.ix4] = 0.0
-#             P_pp = P_pp.reshape((no ** 2,) * 2)
-#             Pr[e, ...] = rotate(P_pp, self.U_pq.T)
-
-#     @assert_domain("e")
-#     def solve_unscreening(self):
-#         W = self.arrays["r"]
-#         self.chi.arrays["r"] = self.chi.arrays.pop("l")
-#         U = self.chi.arrays["r"]
-#         for e in range(self.energies.size):
-#             self.rotate(W[e], out=U[e])
-
-#     def update_unscreening2(self):
-#         self.update_polarization()  # Pr(e), P>(e)
-#         self.screen_polarization()
-#         self.solve_screening()  # Wr(e), W>(e)
-#         self.solve_unscreening()  # Ur(e)
