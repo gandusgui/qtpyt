@@ -58,7 +58,12 @@ class BaseGreenFunction:
 
     def get_pdos(self, energy):
         """Projected density of states."""
-        return -dotdiag(self.S, self.retarded(energy).dot(self.S)).imag / pi
+        return (
+            -(
+                dotdiag(self.S, self.retarded(energy).dot(self.S)) / self.S.diagonal()
+            ).imag
+            / pi
+        )
 
 
 class GreenFunction(BaseGreenFunction):
